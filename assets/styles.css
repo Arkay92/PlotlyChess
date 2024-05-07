@@ -1,0 +1,35 @@
+/* Center the board on the page */
+div.dash-graph {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+}
+
+/* Style for the game status and move messages */
+#game-status,
+#move-message {
+    text-align: center;
+    font-size: 24px;
+    margin-top: 10px;
+}
+
+#move-message {
+    color: red;
+}
+
+/* Style for the draggable elements */
+.drag {
+    cursor: pointer;
+    position: absolute;
+}
+
+#chessboard {
+    margin: 80px auto 20px;
+    width: fit-content;
+}
+
+#reset-button {
+    margin: 0 auto;
+    display: block;
+}
