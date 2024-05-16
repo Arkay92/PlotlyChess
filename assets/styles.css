@@ -33,3 +33,16 @@ div.dash-graph {
     margin: 0 auto;
     display: block;
 }
+
+.modebar-container {
+    display: none;
+}
+
+html {
+    height: 100vh;
+}
+
+body {
+    height: 100%;
+    margin: 0 !important;
+}
