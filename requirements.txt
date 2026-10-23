@@ -1,5 +1,4 @@
-dash
-transformers
-plotly
-torch
-chess
+dash>=3.0,<4
+plotly>=6.0,<7
+chess>=1.11,<2
+numpy>=1.26,<3

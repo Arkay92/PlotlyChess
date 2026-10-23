@@ -1,0 +1,33 @@
+{
+  "sources": {
+    "Carlsen": {
+      "url": "https://www.pgnmentor.com/players/Carlsen.zip",
+      "sha256": "ba4591237a43c27fa19a9b3539ba5ce136ea93b65a9800418865b1d0a8090853",
+      "read": 7818,
+      "kept": 7818
+    },
+    "Kasparov": {
+      "url": "https://www.pgnmentor.com/players/Kasparov.zip",
+      "sha256": "02d021df5ea2b2896f89ec752eb0f9db8af61f2726a6d4e75a7bb1ced9aa9a80",
+      "read": 2128,
+      "kept": 2124,
+      "excluded": 1,
+      "duplicates": 3
+    },
+    "Anand": {
+      "url": "https://www.pgnmentor.com/players/Anand.zip",
+      "sha256": "3f2aa841ebdfffb33ba81f3a46ab97987efb06d29b8b4cda635f35a2240c7f9a",
+      "read": 4311,
+      "kept": 4083,
+      "duplicates": 227,
+      "excluded": 1
+    }
+  },
+  "results": {
+    "1/2-1/2": 5251,
+    "0-1": 3585,
+    "1-0": 5189
+  },
+  "total_games": 14025,
+  "training_sha256": "691b6f97f44e12a6e42e97fb9f007d74e1a08203b44c184820a6974bda99a808"
+}

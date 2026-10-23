@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.npz
+data/pgn/*.zip
+data/pgn/*.pgn
+artifacts/
+deploy/
