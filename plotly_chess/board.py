@@ -14,10 +14,11 @@ def piece_image(symbol):
     return 'data:image/svg+xml;charset=utf-8,' + quote(svg)
 
 
-def interactive_board(board, selected=None):
+def interactive_board(board, selected=None, allowed_color=None):
     """A semantic, responsive board. Pointer events are bridged by board.js."""
     ended = board.is_game_over(claim_draw=True)
-    moves = list(board.legal_moves) if not ended else []
+    can_act = not ended and (allowed_color is None or board.turn == allowed_color)
+    moves = list(board.legal_moves) if can_act else []
     destinations = {m.to_square for m in moves if m.from_square == selected}
     last = board.peek() if board.move_stack else None
     squares = []
@@ -47,7 +48,7 @@ def interactive_board(board, selected=None):
                 title=label, type='button', **{
                     'aria-label':label, 'aria-pressed':str(square == selected).lower(),
                     'data-square':str(square),
-                    'data-movable':str(bool(piece and piece.color == board.turn and not ended)).lower(),
+                    'data-movable':str(bool(piece and piece.color == board.turn and can_act)).lower(),
                     'data-legal':','.join(str(m.to_square) for m in moves if m.from_square == square)}))
     return html.Div(squares, className='chess-grid', **{'aria-label':'Chessboard. White at the bottom.', 'data-fen':board.fen()})
 

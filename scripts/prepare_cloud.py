@@ -25,6 +25,9 @@ def main():
         for source in (root/directory).glob(pattern):
             if source.is_file():
                 shutil.copy2(source,target/source.name)
+    for cache in destination.rglob('__pycache__'):
+        if cache.is_dir():
+            shutil.rmtree(cache)
     model_target = destination/'chess-npc.npz'
     if args.model:
         shutil.copy2(args.model,model_target)

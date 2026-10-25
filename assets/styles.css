@@ -64,6 +64,26 @@ h2 { font-size:14px; font-weight:650; margin:0; letter-spacing:-.2px; }
 .mode-switch label:has(input:checked) { background:white; color:var(--ink); box-shadow:0 1px 4px #00000012; font-weight:600; }
 .mode-switch input { position:absolute; opacity:0; width:1px; height:1px; }
 .mode-switch label:has(input:focus-visible) { outline:2px solid var(--accent); }
+.mp-panel { margin-top:16px; }
+.mp-panel.hidden { display:none; }
+.mp-box { background:#f9f8f4; border:1px solid var(--line); border-radius:8px; padding:14px; }
+.mp-note { margin:0 0 11px; font-size:11px; color:var(--muted); line-height:1.45; }
+.mp-choice-row,.mp-join-row,.mp-sub-actions,.mp-code-row,.mp-connected-head { display:flex; gap:8px; align-items:center; }
+.mp-choice-btn { flex:1; text-align:center; }
+.mp-code-input { width:0; min-width:0; flex:1; padding:9px 10px; border:1px solid var(--line); background:white; border-radius:6px; font-size:12px; font-weight:650; letter-spacing:2px; text-transform:uppercase; color:var(--ink); }
+.mp-sub-actions { margin-top:9px; }
+.mp-sub-btn { padding:7px 10px; font-size:10px; }
+.mp-code-badge { flex:1; background:white; border:1px dashed #c7cec2; border-radius:6px; padding:9px 12px; font-size:16px; letter-spacing:3.2px; text-align:center; color:var(--ink); font-variant-numeric:tabular-nums; }
+.mp-copy-btn { padding:9px 11px; }
+.mp-status-row { display:flex; align-items:center; gap:7px; margin-top:11px; font-size:11px; color:var(--muted); }
+.mp-status-text { flex:1; }
+.mp-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.mp-dot.waiting { background:var(--accent); }
+.mp-dot.connected { background:#6b9362; }
+.mp-code-pill,.mp-role-pill { font-size:10px; font-weight:650; padding:5px 8px; border-radius:5px; }
+.mp-code-pill { background:white; border:1px solid var(--line); letter-spacing:1px; color:var(--ink); }
+.mp-role-pill { background:#e8eee2; color:#52674a; margin-left:auto; }
+.mp-leave-link { background:none; border:0; padding:2px 4px; font-size:10px; color:var(--accent); text-decoration:underline; }
 .turn-status { margin:25px 0 8px; display:flex; align-items:center; gap:9px; font-size:14px; }
 .turn-dot { width:9px; height:9px; border-radius:50%; background:#d1d8c3; border:2px solid #7b8b6e; flex-shrink:0; }
 .turn-status strong { font-weight:550; }

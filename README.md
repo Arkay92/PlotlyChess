@@ -1,7 +1,8 @@
 # Plotly Chess
 
 A Dash/Plotly chess game with independent browser sessions, legal move validation,
-SAN/UCI input, promotion selection, hints and local two-player play.
+SAN/UCI input, promotion selection, hints, local two-player play and live
+WebSocket multiplayer rooms.
 
 The responsive playing surface uses interactive HTML squares and bundled SVG
 pieces. Drag with a mouse, pen or touch, or click a piece and its destination.
@@ -101,17 +102,21 @@ the UI explicitly identifies material search. Neither mode claims engine strengt
 
 - `game.py`: immutable transitions and move-history replay, including repetition.
 - `board.py`: SVG pieces, interactive squares and highlights; optional Plotly figure renderer.
-- `assets/board.js`: pointer gestures, drag previews and keyboard navigation.
+- `multiplayer.py`: server-authoritative multiplayer room registry and RFC 6455 WebSocket transport (`/ws`).
+- `assets/board.js`: pointer gestures, drag previews, keyboard navigation and live WebSocket synchronization.
 - `ai.py`: search, categorical circuits, neural gating and safe NPZ persistence.
 - `train.py`: PGN ingestion and evaluation.
 - `app.py`: application factory and one callback coordinating game state.
-- `tests/`: rule, session, AI, persistence and HTTP smoke checks.
+- `tests/`: rule, session, multiplayer, AI, persistence and HTTP smoke checks.
 
-The original socket lobby was incomplete and has been replaced by two players on
-one device. Remote multiplayer is not implemented. Games live in browser session
-storage; they are not authoritative server records. There is no language-model
-question box: hints now come from the actual legal move selector. Model loading
-is explicit through the environment variable, with errors surfaced at startup.
+Selecting **Multiplayer** lets a player choose **Create game** (generating a
+6-character room code to share with a friend) or **Join game** (entering a
+friend's room code). Once both players are connected, moves are validated on the
+server and pushed in real time over WebSockets (`/ws`) via
+`window.dash_clientside.set_props` so White and Black take turns on the board.
+There is no language-model question box: hints now come from the actual legal
+move selector. Model loading is explicit through the environment variable, with
+errors surfaced at startup.
 
 Draw claims are automatically accepted whenever python-chess permits a claim.
 Changing mode starts a new game. The WSGI entry point is `main:server`; importing
