@@ -14,6 +14,7 @@ def main():
         errors = []
         page.on('pageerror',lambda error:errors.append(str(error)))
         page.goto('http://127.0.0.1:8060/')
+        page.locator('#auth-guest-btn').click()
         expect(page.locator('.square')).to_have_count(64)
         artifacts = Path('artifacts')
         artifacts.mkdir(exist_ok=True)
@@ -85,6 +86,7 @@ def main():
         touch = browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         mobile = touch.new_page()
         mobile.goto('http://127.0.0.1:8060/')
+        mobile.locator('#auth-guest-btn').tap()
         expect(mobile.locator('.square')).to_have_count(64)
         mobile.get_by_text('Two players',exact=True).tap()
         expect(mobile.locator('#opponent')).to_contain_text('Local player')

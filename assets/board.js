@@ -11,6 +11,7 @@
     let socketCode = null;
     let reconnectTimer = null;
     let wsSupported = true;
+    let suppressSocketUntil = 0;
 
     const squareAt = (target) => target instanceof Element ? target.closest('.square') : null;
     const grid = () => document.querySelector('.chess-grid');
@@ -31,10 +32,15 @@
     }
 
     function send(action) {
-        if (!window.dash_clientside?.set_props) return;
-        if (isBusy()) {
-            queuedAction = action;
+        console.log('[BOARD.JS] send called, type:', action?.type, 'has_set_props:', Boolean(window.dash_clientside?.set_props));
+        if (!window.dash_clientside?.set_props || !action) return;
+        const isBoardMove = action.type === 'click' || action.type === 'drop' || action.type === 'mp-sync';
+        if (isBoardMove && isBusy()) {
+            if (action.type !== 'mp-sync') queuedAction = action;
             return;
+        }
+        if (!isBoardMove) {
+            queuedAction = null;
         }
         busy = true;
         if (busyTimer) clearTimeout(busyTimer);
@@ -44,9 +50,10 @@
     }
 
     function applySyncEvent(msg, code) {
+        if (performance.now() < suppressSocketUntil) return;
         if (!msg || msg.type !== 'sync' || msg.code !== code) return;
         const activeSession = document.querySelector('.mp-session');
-        if (!activeSession || activeSession.dataset.roomCode !== code) return;
+        if (!activeSession || activeSession.offsetParent === null || activeSession.dataset.roomCode !== code) return;
         const currentVersion = Number(activeSession.dataset.mpVersion || 0);
         const currentConnected = activeSession.dataset.mpConnected === 'true';
         if (Number(msg.version) > currentVersion || Boolean(msg.connected) !== currentConnected) {
@@ -72,9 +79,20 @@
     }
 
     function syncMultiplayerSocket() {
-        if (!wsSupported) return;
+        if (performance.now() < suppressSocketUntil) {
+            closeSocket();
+            return;
+        }
         const session = document.querySelector('.mp-session');
-        const code = session?.dataset.roomCode || null;
+        const roomVisible = Boolean(session && session.offsetParent !== null);
+        const code = roomVisible ? (session.dataset.roomCode || null) : null;
+        if (code) {
+            const expectedSearch = `?code=${encodeURIComponent(code)}`;
+            if (window.location.search !== expectedSearch && window.history?.replaceState) {
+                window.history.replaceState(null, '', `${window.location.pathname}${expectedSearch}`);
+            }
+        }
+        if (!wsSupported) return;
         if (!code) {
             closeSocket();
             return;
@@ -180,6 +198,57 @@
     document.addEventListener('click', (event) => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+        const userMenu = document.getElementById('user-menu');
+        if (userMenu?.hasAttribute('open') && (!userMenu.contains(target) || target.closest('.user-dropdown-menu button'))) {
+            setTimeout(() => userMenu.removeAttribute('open'), 50);
+        }
+        const homeOrLeaveBtn = target.closest('#brand-home-btn, #nav-play-btn, #mp-leave-btn, #nav-profile-btn, #nav-leaderboard-btn, #mp-tab-lobby-btn, #mp-tab-find-btn, #mp-choose-join-btn');
+        if (homeOrLeaveBtn) {
+            queuedAction = null;
+            suppressSocketUntil = performance.now() + 1500;
+            document.querySelector('.mp-session')?.removeAttribute('data-room-code');
+            closeSocket();
+            if (window.location.search && window.history?.replaceState) {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+            return;
+        }
+        const resumeBtn = target.closest('[data-resume-game]');
+        if (resumeBtn) {
+            const gid = resumeBtn.dataset.resumeGame || '';
+            console.log('[BOARD.JS] resumeBtn clicked, gid:', gid);
+            if (gid.startsWith('mp:')) {
+                suppressSocketUntil = 0;
+                const code = gid.slice(3);
+                if (code && window.history?.replaceState) {
+                    window.history.replaceState(null, '', `${window.location.pathname}?code=${encodeURIComponent(code)}`);
+                }
+            } else {
+                suppressSocketUntil = performance.now() + 1500;
+                document.querySelector('.mp-session')?.removeAttribute('data-room-code');
+                closeSocket();
+                if (window.location.search && window.history?.replaceState) {
+                    window.history.replaceState(null, '', window.location.pathname);
+                }
+            }
+            send({type: 'resume-game', game_id: gid});
+            return;
+        }
+        const dismissBtn = target.closest('[data-dismiss-game]');
+        if (dismissBtn) {
+            send({type: 'dismiss-game', game_id: dismissBtn.dataset.dismissGame});
+            return;
+        }
+        const joinOpenBtn = target.closest('[data-join-open-game]');
+        if (joinOpenBtn) {
+            const code = joinOpenBtn.dataset.joinOpenGame || '';
+            suppressSocketUntil = 0;
+            if (code && window.history?.replaceState) {
+                window.history.replaceState(null, '', `${window.location.pathname}?code=${encodeURIComponent(code)}`);
+            }
+            send({type: 'mp-join', code});
+            return;
+        }
         const copyBtn = target.closest('#mp-copy-btn');
         if (copyBtn) {
             const code = copyBtn.dataset.code || '';

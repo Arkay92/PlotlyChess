@@ -8,6 +8,7 @@ import sqlite3
 import struct
 import tempfile
 import threading
+import time
 from urllib.parse import parse_qs
 
 import chess
@@ -99,6 +100,7 @@ class MultiplayerHub:
     def __init__(self, shared=False, db_path=None):
         self._lock = threading.Lock()
         self._rooms = {}
+        self._sessions = {}
         self._clients = {}
         if db_path is not None:
             self._db_path = Path(db_path)
@@ -125,12 +127,100 @@ class MultiplayerHub:
                         black_token TEXT,
                         moves_json TEXT NOT NULL,
                         version INTEGER NOT NULL,
-                        message TEXT NOT NULL
+                        message TEXT NOT NULL,
+                        host_name TEXT NOT NULL DEFAULT 'Player',
+                        host_rank TEXT NOT NULL DEFAULT 'Contender (1000)',
+                        host_avatar TEXT NOT NULL DEFAULT 'K',
+                        is_public INTEGER NOT NULL DEFAULT 1
+                    )
+                    """
+                )
+                for col_sql in (
+                    "ALTER TABLE rooms ADD COLUMN host_name TEXT NOT NULL DEFAULT 'Player'",
+                    "ALTER TABLE rooms ADD COLUMN host_rank TEXT NOT NULL DEFAULT 'Contender (1000)'",
+                    "ALTER TABLE rooms ADD COLUMN host_avatar TEXT NOT NULL DEFAULT 'K'",
+                    "ALTER TABLE rooms ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1",
+                ):
+                    try:
+                        conn.execute(col_sql)
+                    except sqlite3.Error:
+                        pass
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        sid TEXT PRIMARY KEY,
+                        state_json TEXT NOT NULL,
+                        updated_at REAL NOT NULL
                     )
                     """
                 )
         except sqlite3.Error:
             self._db_path = None
+
+    def save_session(self, sid, state):
+        if not sid:
+            return
+        now = time.time()
+        entry = {"state": dict(state), "ts": now}
+        with self._lock:
+            self._sessions[sid] = entry
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        conn.execute(
+                            """
+                            INSERT INTO sessions (sid, state_json, updated_at)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(sid) DO UPDATE SET
+                                state_json=excluded.state_json,
+                                updated_at=excluded.updated_at
+                            """,
+                            (sid, json.dumps(state), now),
+                        )
+                except sqlite3.Error:
+                    pass
+
+    def get_session(self, sid, max_age=5.0):
+        if not sid:
+            return None
+        now = time.time()
+        with self._lock:
+            best = self._sessions.get(sid)
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        row = conn.execute(
+                            "SELECT state_json, updated_at FROM sessions WHERE sid = ?",
+                            (sid,),
+                        ).fetchone()
+                        if row:
+                            db_entry = {
+                                "state": json.loads(row["state_json"]),
+                                "ts": float(row["updated_at"]),
+                            }
+                            if not best or db_entry["state"].get("seq", 0) >= best["state"].get("seq", 0):
+                                best = db_entry
+                                self._sessions[sid] = best
+                except (sqlite3.Error, ValueError, TypeError):
+                    pass
+            if best and (now - best.get("ts", 0)) <= max_age:
+                return best
+            return None
+
+    def _row_to_room(self, row):
+        keys = row.keys()
+        return {
+            "code": row["code"],
+            "white_token": row["white_token"],
+            "black_token": row["black_token"],
+            "moves": json.loads(row["moves_json"]),
+            "version": int(row["version"]),
+            "message": row["message"],
+            "host_name": row["host_name"] if "host_name" in keys else "Player",
+            "host_rank": row["host_rank"] if "host_rank" in keys else "Contender (1000)",
+            "host_avatar": row["host_avatar"] if "host_avatar" in keys else "K",
+            "is_public": bool(row["is_public"]) if "is_public" in keys else True,
+        }
 
     def _load_room_locked(self, code):
         if self._db_path:
@@ -138,14 +228,7 @@ class MultiplayerHub:
                 with self._connect_db() as conn:
                     row = conn.execute("SELECT * FROM rooms WHERE code = ?", (code,)).fetchone()
                     if row:
-                        room = {
-                            "code": row["code"],
-                            "white_token": row["white_token"],
-                            "black_token": row["black_token"],
-                            "moves": json.loads(row["moves_json"]),
-                            "version": int(row["version"]),
-                            "message": row["message"],
-                        }
+                        room = self._row_to_room(row)
                         self._rooms[code] = room
                         return room
             except sqlite3.Error:
@@ -159,14 +242,21 @@ class MultiplayerHub:
                 with self._connect_db() as conn:
                     conn.execute(
                         """
-                        INSERT INTO rooms (code, white_token, black_token, moves_json, version, message)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO rooms (
+                            code, white_token, black_token, moves_json, version, message,
+                            host_name, host_rank, host_avatar, is_public
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(code) DO UPDATE SET
                             white_token=excluded.white_token,
                             black_token=excluded.black_token,
                             moves_json=excluded.moves_json,
                             version=excluded.version,
-                            message=excluded.message
+                            message=excluded.message,
+                            host_name=excluded.host_name,
+                            host_rank=excluded.host_rank,
+                            host_avatar=excluded.host_avatar,
+                            is_public=excluded.is_public
                         """,
                         (
                             room["code"],
@@ -175,6 +265,10 @@ class MultiplayerHub:
                             json.dumps(room["moves"]),
                             room["version"],
                             room["message"],
+                            room.get("host_name", "Player"),
+                            room.get("host_rank", "Contender (1000)"),
+                            room.get("host_avatar", "K"),
+                            1 if room.get("is_public", True) else 0,
                         ),
                     )
             except sqlite3.Error:
@@ -196,6 +290,10 @@ class MultiplayerHub:
             "moves": list(room["moves"]),
             "version": room["version"],
             "message": room["message"],
+            "host_name": room.get("host_name", "Player"),
+            "host_rank": room.get("host_rank", "Contender (1000)"),
+            "host_avatar": room.get("host_avatar", "K"),
+            "is_public": bool(room.get("is_public", True)),
         }
 
     def _sync_event(self, room):
@@ -220,7 +318,7 @@ class MultiplayerHub:
         for client in stale:
             clients.discard(client)
 
-    def create_room(self):
+    def create_room(self, host_name="Player", host_rank="Contender (1000)", host_avatar="K", is_public=True):
         with self._lock:
             code = self._generate_code_locked()
             token = secrets.token_hex(8)
@@ -230,10 +328,47 @@ class MultiplayerHub:
                 "black_token": None,
                 "moves": [],
                 "version": 1,
-                "message": f"Game created. Share code {code} with your friend.",
+                "message": (
+                    f"Game hosted in open lobby (Code {code}). Waiting for an opponent to join…"
+                    if is_public
+                    else f"Game created. Share code {code} with your friend."
+                ),
+                "host_name": (host_name or "Player").strip() or "Player",
+                "host_rank": (host_rank or "Contender (1000)").strip() or "Contender (1000)",
+                "host_avatar": (host_avatar or "K").strip() or "K",
+                "is_public": bool(is_public),
             }
             self._save_room_locked(room)
             return self._snapshot(room, token)
+
+    def list_open_rooms(self):
+        """Return all open rooms waiting for a second player."""
+        with self._lock:
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        rows = conn.execute(
+                            "SELECT * FROM rooms WHERE black_token IS NULL AND is_public = 1 ORDER BY rowid DESC"
+                        ).fetchall()
+                        for row in rows:
+                            room = self._row_to_room(row)
+                            self._rooms[room["code"]] = room
+                except sqlite3.Error:
+                    pass
+            open_rooms = []
+            for room in reversed(list(self._rooms.values())):
+                if room.get("black_token") is None and room.get("is_public", True):
+                    open_rooms.append(
+                        {
+                            "code": room["code"],
+                            "host_name": room.get("host_name", "Player"),
+                            "host_rank": room.get("host_rank", "Contender (1000)"),
+                            "host_avatar": room.get("host_avatar", "K"),
+                            "version": room.get("version", 1),
+                            "message": room.get("message", ""),
+                        }
+                    )
+            return open_rooms
 
     def join_room(self, code, token=None):
         cleaned = (code or "").strip().upper()
