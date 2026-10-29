@@ -50,3 +50,59 @@ def test_cloud_multi_worker_shared_hub_and_poll_fallback(tmp_path):
     }, lambda status, headers: statuses.append(status)))
     assert statuses == ['204 No Content']
     assert body == [b'']
+
+
+def test_cloud_persistent_filesystem_detection(monkeypatch, tmp_path):
+    from plotly_chess.storage import get_cloud_db_paths, get_cloud_storage_dir
+
+    # 1. Test GAMES_DIR env var
+    games_mount = tmp_path / "Games"
+    games_mount.mkdir()
+    monkeypatch.setenv("GAMES_DIR", str(games_mount))
+    assert get_cloud_storage_dir("Games") == games_mount.resolve()
+    rooms_p, users_p = get_cloud_db_paths("Games")
+    assert rooms_p == games_mount.resolve() / "plotly_chess_rooms.sqlite3"
+    assert users_p == games_mount.resolve() / "plotly_chess_users.sqlite3"
+
+    # 2. Test DASH_DATA_DIR env var fallback
+    monkeypatch.delenv("GAMES_DIR", raising=False)
+    data_mount = tmp_path / "data"
+    data_mount.mkdir()
+    monkeypatch.setenv("DASH_DATA_DIR", str(data_mount))
+    assert get_cloud_storage_dir("Games") == data_mount.resolve()
+
+
+def test_cloud_sqlite_journal_mode_delete_and_persistence(tmp_path):
+    from plotly_chess.auth import AuthStore
+    from plotly_chess.multiplayer import MultiplayerHub
+
+    db_hub = tmp_path / "hub.sqlite3"
+    db_auth = tmp_path / "auth.sqlite3"
+
+    hub = MultiplayerHub(db_path=db_hub)
+    auth = AuthStore(db_path=db_auth)
+
+    with hub._connect_db() as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode.lower() == "delete"
+
+    with auth._connect_db() as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode.lower() == "delete"
+
+
+def test_cloud_shared_stores_adopt_cloud_storage(monkeypatch, tmp_path):
+    from plotly_chess.auth import AuthStore
+    from plotly_chess.multiplayer import MultiplayerHub
+
+    games_mount = tmp_path / "Games"
+    games_mount.mkdir()
+    monkeypatch.setenv("GAMES_DIR", str(games_mount))
+
+    hub = MultiplayerHub(shared=True)
+    auth = AuthStore(shared=True)
+
+    assert hub._db_path == games_mount.resolve() / "plotly_chess_rooms.sqlite3"
+    assert auth._db_path == games_mount.resolve() / "plotly_chess_users.sqlite3"
+
+

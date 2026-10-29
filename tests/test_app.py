@@ -36,6 +36,12 @@ def _make_inputs(mode='local', action=None, search='', pathname='/'):
         {'id': 'profile-lichess-btn', 'property': 'n_clicks', 'value': 0},
         {'id': 'profile-chesscom-btn', 'property': 'n_clicks', 'value': 0},
         {'id': 'brand-home-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'nav-about-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'footer-about-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'menu-about-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'about-back-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'about-tab-tech-btn', 'property': 'n_clicks', 'value': 0},
+        {'id': 'about-tab-why-btn', 'property': 'n_clicks', 'value': 0},
     ]
 
 
@@ -72,7 +78,10 @@ def test_app_layout_and_callback_registration():
     app = create_app()
     client = app.server.test_client()
     assert client.get('/').status_code == 200
-    assert client.get('/_dash-layout').status_code == 200
+    res_layout = client.get('/_dash-layout')
+    assert res_layout.status_code == 200
+    assert 'burger-menu-btn' in str(res_layout.get_json())
+    assert 'site-nav' in str(res_layout.get_json())
     assert client.get('/_dash-dependencies').status_code == 200
     assert len(app.callback_map) == 1
 
@@ -416,3 +425,177 @@ def test_multiplayer_flow_and_websocket_sync():
 
     client_sock.close()
     ws_thread.join(timeout=2)
+
+
+def test_about_and_why_plotly_screen():
+    app = create_app()
+    client = app.server.test_client()
+    output = next(iter(app.callback_map))
+
+    def call_app(state, trigger):
+        response = client.post('/_dash-update-component', json={
+            'output': output,
+            'outputs': [{'id': o.component_id, 'property': o.component_property} for o in app.callback_map[output]['output']],
+            'inputs': _make_inputs(),
+            'state': _make_state(state),
+            'changedPropIds': [trigger] if trigger else [],
+        })
+        assert response.status_code == 200
+        return response.get_json()['response']
+
+    # 1. Clicking footer "Why Plotly & Architecture" link opens the About screen
+    about_res = call_app({'moves': [], 'selected': None}, 'footer-about-btn.n_clicks')
+    assert about_res['about-screen']['style']['display'] == 'block'
+    assert about_res['home-screen']['style']['display'] == 'none'
+    assert about_res['auth-screen']['style']['display'] == 'none'
+    assert about_res['about-tab-tech-btn']['className'] == 'button primary'
+    assert about_res['about-tab-why-btn']['className'] == 'button quiet'
+
+    # Verify author profile and links in the tech architecture tab
+    content_str = str(about_res['about-content']['children'])
+    assert 'Robert McMenemy' in content_str
+    assert 'https://www.linkedin.com/in/robert-mcmenemy' in content_str
+    assert 'https://github.com/arkay92' in content_str
+    assert 'https://medium.com/@rabmcmenemy' in content_str
+    assert 'scholar.google' in content_str
+    assert 'Full-Stack Reactive Architecture' in content_str
+
+    # 2. Switching to the Why Plotly Enterprise tab
+    why_res = call_app(about_res['game']['data'], 'about-tab-why-btn.n_clicks')
+    assert why_res['about-tab-tech-btn']['className'] == 'button quiet'
+    assert why_res['about-tab-why-btn']['className'] == 'button primary'
+    why_str = str(why_res['about-content']['children'])
+    assert 'Why Plotly: A Production Platform IT Can Govern' in why_str
+    assert 'SOC 2 Type II' in why_str
+    assert 'ISO 27001' in why_str
+    assert 'Dashboards vs. DIY vs. A Governed App Platform' in why_str
+    assert 'dash.plotly.com/dash-enterprise' in why_str
+
+    # 3. Switching back to the Tech Architecture tab
+    tech_res = call_app(why_res['game']['data'], 'about-tab-tech-btn.n_clicks')
+    tech_str = str(tech_res['about-content']['children'])
+    assert 'Robert McMenemy' in tech_str
+
+    # 4. Returning to the game
+    back_res = call_app(tech_res['game']['data'], 'about-back-btn.n_clicks')
+    assert back_res['about-screen']['style']['display'] == 'none'
+    assert back_res['game']['data']['page'] == 'home'
+
+
+def test_friends_system_and_online_presence(tmp_path):
+    from plotly_chess.auth import AuthStore
+    import time
+
+    store = AuthStore(db_path=tmp_path / 'friends_test.sqlite3')
+    u1 = store.register('alice', 'password123')
+    u2 = store.register('bob', 'password456')
+
+    # Initially not friends
+    assert not store.is_friend('alice', 'bob')
+    assert store.get_friends('alice') == []
+
+    # Add friend
+    assert store.add_friend('alice', 'bob') is True
+    assert store.is_friend('alice', 'bob') is True
+    assert not store.is_friend('bob', 'alice')  # Directed friendship
+
+    # Online status detection
+    assert not store.is_online('bob')
+    store.touch_user_activity('bob')
+    assert store.is_online('bob') is True
+
+    # Retrieve friends with online status
+    friends = store.get_friends('alice')
+    assert len(friends) == 1
+    assert friends[0]['username'] == 'bob'
+    assert friends[0]['is_online'] is True
+
+    # Remove friend
+    assert store.remove_friend('alice', 'bob') is True
+    assert not store.is_friend('alice', 'bob')
+    assert store.get_friends('alice') == []
+
+
+def test_multiplayer_completed_games_feed(tmp_path):
+    from plotly_chess.multiplayer import MultiplayerHub
+
+    hub = MultiplayerHub(db_path=tmp_path / 'mp_test.sqlite3')
+    # Fresh hub returns empty list (no dummy data)
+    default_games = hub.get_recent_completed_games()
+    assert default_games == []
+
+    # Record a completed game
+    entry = hub.record_completed_game(
+        code='TEST01',
+        white_name='Alice',
+        white_user='alice',
+        white_avatar='Q',
+        black_name='Bob',
+        black_user='bob',
+        black_avatar='k',
+        result='1-0',
+        result_desc='White won by checkmate',
+        moves_count=42,
+    )
+    assert entry['code'] == 'TEST01'
+
+    # Retrieve recent games
+    recent = hub.get_recent_completed_games(limit=5)
+    assert recent[0]['code'] == 'TEST01'
+    assert recent[0]['white_user'] == 'alice'
+    assert recent[0]['black_user'] == 'bob'
+    assert recent[0]['result'] == '1-0'
+    assert recent[0]['moves_count'] == 42
+
+
+def test_profile_view_other_user_and_toggle_friend_action(tmp_path):
+    from plotly_chess.auth import AuthStore
+
+    store = AuthStore(db_path=tmp_path / 'app_friends.sqlite3')
+    store.register('alice', 'password123')
+    store.register('bob', 'password456')
+
+    app = create_app(auth_store=store)
+    client = app.server.test_client()
+    output = next(iter(app.callback_map))
+
+    def call_action(state, action, mode='ai'):
+        res = client.post('/_dash-update-component', json={
+            'output': output,
+            'outputs': [{'id': o.component_id, 'property': o.component_property} for o in app.callback_map[output]['output']],
+            'inputs': _make_inputs(mode, action=action),
+            'state': _make_state(state),
+            'changedPropIds': ['board-action.data'] if action else [],
+        })
+        assert res.status_code == 200
+        return res.get_json()['response']
+
+    # Log in Alice
+    alice_login = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': [{'id': o.component_id, 'property': o.component_property} for o in app.callback_map[output]['output']],
+        'inputs': _make_inputs('ai'),
+        'state': _make_state({'moves': [], 'selected': None}, username='alice', password='password123'),
+        'changedPropIds': ['auth-login-btn.n_clicks'],
+    }).get_json()['response']
+    assert alice_login['user-badge']['children'].startswith('alice')
+
+    # View Bob's profile via view-profile action (as happens when clicking on feed or leaderboard)
+    view_bob = call_action(alice_login['game']['data'], {'type': 'view-profile', 'username': 'bob'})
+    assert view_bob['profile-screen']['style']['display'] == 'block'
+    assert 'bob' in view_bob['profile-header-name']['children'].lower()
+    # Settings controls are hidden when viewing another user
+    assert view_bob['profile-settings-section']['style']['display'] == 'none'
+    # Friend action button is present
+    assert '➕ Add Friend' in str(view_bob['profile-friend-action-container']['children'])
+
+    # Toggle friend action adds Bob as friend
+    add_bob = call_action(view_bob['game']['data'], {'type': 'toggle-friend', 'username': 'bob'})
+    assert 'Added @bob as a friend' in add_bob['profile-feedback']['children']
+    assert store.is_friend('alice', 'bob') is True
+
+    # View Bob's profile again - button now reflects friend status
+    view_bob_again = call_action(add_bob['game']['data'], {'type': 'view-profile', 'username': 'bob'})
+    assert '✓ Friends' in str(view_bob_again['profile-friend-action-container']['children'])
+
+

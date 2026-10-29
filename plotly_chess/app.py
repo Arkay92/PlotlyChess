@@ -304,7 +304,10 @@ def render_leaderboard_content(entries, current_auth):
                 html.Strong(f'#{entry["position"]}', style={'color': '#c56a49' if entry['position'] <= 3 else '#7a827e'}),
                 html.Div([
                     html.Img(src=piece_image(avatar_sym), alt='', style={'width': '24px', 'height': '24px', 'borderRadius': '5px', 'background': '#eeeee7', 'padding': '2px'}),
-                    html.Strong(name_label),
+                    html.Button(name_label, type='button', className='feed-player-btn',
+                                **({'data-view-profile': entry['username']} if not is_me else {}),
+                                style={'fontWeight': '700', 'fontSize': '13px', 'textAlign': 'left'},
+                                title=f"View @{entry['username']}'s profile" if not is_me else 'Your profile'),
                 ], style={'display': 'flex', 'alignItems': 'center', 'gap': '8px'}),
                 html.Span(entry['rank'], style={'fontSize': '11px', 'fontWeight': '600', 'color': '#52674a'}),
                 html.Strong(str(entry['rating'])),
@@ -333,6 +336,459 @@ def render_leaderboard_content(entries, current_auth):
         html.Div([table], className='panel', style={'padding': '12px 16px', 'overflowX': 'auto'}),
         tiers_note,
     ])
+
+
+def render_recent_games(games):
+    """Render community feed cards of recent completed multiplayer matches."""
+    if not games:
+        return html.Div([
+            html.P('No multiplayer games completed yet. Host or join a match to be the first on the board!',
+                   style={'fontSize': '12px', 'color': '#7a827e', 'margin': '14px 0', 'fontStyle': 'italic'})
+        ], style={'background': '#fafbf8', 'border': '1px dashed #d5d9d1', 'borderRadius': '8px', 'textAlign': 'center', 'padding': '16px 14px', 'marginTop': '8px'})
+    cards = []
+    for g in games:
+        w_user = g.get('white_user')
+        b_user = g.get('black_user')
+        w_name = g.get('white_name') or 'White'
+        b_name = g.get('black_name') or 'Black'
+        res = g.get('result', '—')
+        res_desc = g.get('result_desc', 'Completed')
+        moves = g.get('moves_count', 0)
+
+        score_class = 'draw'
+        if res == '1-0':
+            score_class = 'win-white'
+        elif res == '0-1':
+            score_class = 'win-black'
+
+        if w_user:
+            w_btn = html.Button(w_name, type='button', className='feed-player-btn',
+                                **{'data-view-profile': w_user}, title=f"View @{w_user}'s profile")
+        else:
+            w_btn = html.Span(w_name, className='feed-player-plain')
+
+        if b_user:
+            b_btn = html.Button(b_name, type='button', className='feed-player-btn',
+                                **{'data-view-profile': b_user}, title=f"View @{b_user}'s profile")
+        else:
+            b_btn = html.Span(b_name, className='feed-player-plain')
+
+        cards.append(html.Div([
+            html.Div([
+                html.Img(src=piece_image(g.get('white_avatar', 'K')), alt='', className='feed-avatar'),
+                w_btn,
+            ], className='feed-player feed-player-white'),
+            html.Div([
+                html.Span(res, className=f'feed-score-badge {score_class}'),
+                html.Small(f'{res_desc} · {moves} moves', className='feed-detail'),
+            ], className='feed-center'),
+            html.Div([
+                b_btn,
+                html.Img(src=piece_image(g.get('black_avatar', 'k')), alt='', className='feed-avatar'),
+            ], className='feed-player feed-player-black'),
+        ], className='feed-match-card'))
+    return html.Div(cards, className='feed-grid')
+
+
+def render_friends_widget_content(friends, auth):
+    """Render friend list items with online status indicator dots."""
+    if not auth or auth.get('role') != 'user':
+        return html.Div([
+            html.P('Sign in to view your friends list and see who is online.',
+                   style={'fontSize': '11px', 'color': '#78847e', 'margin': '10px 4px', 'lineHeight': '1.4'}),
+        ])
+    if not friends:
+        return html.Div([
+            html.P('No friends added yet. Click on any player in the match feed or leaderboard to view their profile and add them!',
+                   style={'fontSize': '11px', 'color': '#78847e', 'margin': '10px 4px', 'lineHeight': '1.4'}),
+        ])
+    items = []
+    for f in friends:
+        online = f.get('is_online', False)
+        dot_class = 'online' if online else 'offline'
+        disp = f.get('display_name') or f['username']
+        items.append(html.Div([
+            html.Div([
+                html.Span(className=f'status-dot {dot_class}', title='Online' if online else 'Offline'),
+                html.Img(src=piece_image(f.get('avatar', 'K')), alt='', className='friends-avatar'),
+                html.Div([
+                    html.Strong(disp, className='friends-item-name'),
+                    html.Small(f'{f.get("rank", "Player")} · {f.get("rating", 1000)} pts', className='friends-item-sub'),
+                ], className='friends-item-info'),
+            ], className='friends-item-left'),
+            html.Div([
+                html.Button('Profile', type='button', className='friends-action-btn',
+                            **{'data-view-profile': f['username']}, title=f"View @{f['username']}'s profile"),
+                html.Button('✕', type='button', className='friends-action-btn',
+                            **{'data-toggle-friend': f['username']}, title=f"Remove @{f['username']} from friends",
+                            style={'color': '#9e9e9e', 'padding': '3px 6px'}),
+            ], className='friends-item-actions'),
+        ], className='friends-item'))
+    return html.Div(items, className='friends-list-body')
+
+
+def render_about_content(subtab='tech'):
+    subtab = subtab or 'tech'
+    is_tech = (subtab == 'tech')
+
+    if is_tech:
+        content = html.Div([
+            # Author Banner
+            html.Div([
+                html.Div([
+                    html.Div('RM', className='author-avatar'),
+                    html.Div([
+                        html.H3('Robert McMenemy'),
+                        html.P('Senior AI & Data Solutions Architect · Full-Stack Python Specialist'),
+                    ], className='author-details'),
+                ], className='author-profile'),
+                html.Div([
+                    html.A('💼 LinkedIn', href='https://www.linkedin.com/in/robert-mcmenemy-%F0%9F%91%BE-70a0709b/',
+                           target='_blank', rel='noopener noreferrer', className='author-btn'),
+                    html.A('🐙 GitHub', href='https://github.com/arkay92',
+                           target='_blank', rel='noopener noreferrer', className='author-btn'),
+                    html.A('✍️ Medium', href='https://medium.com/@rabmcmenemy',
+                           target='_blank', rel='noopener noreferrer', className='author-btn'),
+                    html.A('🎓 Google Scholar', href='https://scholar.google.co.uk/citations?user=miTCH3YAAAAJ&hl=en',
+                           target='_blank', rel='noopener noreferrer', className='author-btn'),
+                ], className='author-links-row'),
+            ], className='author-banner'),
+
+            # Hero / Project narrative
+            html.Div([
+                html.P('PROJECT ARCHITECTURE & ENGINEERING WRITEUP', className='eyebrow'),
+                html.H2('How Plotly Chess Was Built & What It Can Do', style={'fontSize': '20px', 'marginBottom': '10px'}),
+                html.P(
+                    'Plotly Chess was built to demonstrate the full capabilities of Plotly Dash in production. '
+                    'Far beyond static charts or analytical dashboards, it showcases a fully server-authoritative, '
+                    'reactive web application combining real-time bidirectional WebSockets, '
+                    'touch/drag-and-drop gestures, durable cloud network filesystems, and machine-learned probabilistic circuits.',
+                    style={'color': '#5a6662', 'fontSize': '13px', 'lineHeight': '1.7', 'margin': '0'},
+                ),
+            ], className='panel', style={'margin': '20px 0'}),
+
+            # 6 Technical Pillar Cards
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.Span('100% PYTHON', className='feature-tag'),
+                        html.Span('REACTIVE CORE', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3('Full-Stack Reactive Architecture', className='feature-title'),
+                    html.P(
+                        'Eliminates heavy JavaScript framework overhead (React, Redux, Node). Built with modular Dash callbacks '
+                        'and standard Python 3.11. Client interactions trigger atomic server state transitions verified against python-chess, '
+                        'ensuring absolute rule enforcement and preventing client-side tampering.',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+
+                html.Div([
+                    html.Div([
+                        html.Span('GESTURES & UX', className='feature-tag'),
+                        html.Span('ZERO DEPENDENCIES', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3('Interactive HTML/SVG Playing Surface', className='feature-title'),
+                    html.P(
+                        'Pure responsive HTML grid squares and vector SVG pieces—no heavy WebGL or canvas dependencies. '
+                        'Supports smooth pointer drag-and-drop, touch gestures for mobile/tablet, legal move destination dots, '
+                        'previous-move highlights, check alerts, and full keyboard navigation (Tab/arrows/Enter).',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+
+                html.Div([
+                    html.Div([
+                        html.Span('NETWORKING', className='feature-tag'),
+                        html.Span('LOW LATENCY', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3('Real-Time Duplex WebSocket Multiplayer', className='feature-title'),
+                    html.P(
+                        'Persistent RFC 6455 WebSocket transport (/ws) with client-side pushes via window.dash_clientside.set_props. '
+                        'Features an in-memory & SQLite pub/sub hub, 6-character room codes, public game hosting lobby, and seamless '
+                        'HTTP long-polling fallback for corporate proxies that strip WebSocket upgrades.',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+
+                html.Div([
+                    html.Div([
+                        html.Span('INFRASTRUCTURE', className='feature-tag'),
+                        html.Span('PLOTLY CLOUD', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3("Persistent Cloud Storage ('Games')", className='feature-title'),
+                    html.P(
+                        "Directly integrates with Plotly Cloud's persistent network storage mount (/Games). Multi-worker Gunicorn "
+                        'processes share durable SQLite databases configured with PRAGMA journal_mode=DELETE and busy_timeout=10000. '
+                        'Rooms, active games, user accounts, and leaderboards survive container restarts and redeployments.',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+
+                html.Div([
+                    html.Div([
+                        html.Span('AI & ML', className='feature-tag'),
+                        html.Span('PROBABILISTIC CIRCUITS', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3('Neural Probabilistic Circuit (NPC) AI', className='feature-title'),
+                    html.P(
+                        'Adapts conditional expert routing to chess. Three normalized categorical sum-product circuits learn '
+                        'material balance, mobility, check status, game phase, and capture likelihoods from master games. '
+                        'A gradient-trained tanh neural gating layer combines expert posteriors based on entropy and KL divergence.',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+
+                html.Div([
+                    html.Div([
+                        html.Span('ECOSYSTEM', className='feature-tag'),
+                        html.Span('REST APIS', style={'fontSize': '10px', 'color': '#7a827e', 'fontWeight': '600'}),
+                    ], className='feature-card-header'),
+                    html.H3('Multi-Game Tracking & Live Profile Sync', className='feature-title'),
+                    html.P(
+                        'Track and resume in-progress matches across local, AI, and multiplayer modes. Includes salted SHA-256 '
+                        'account authentication, custom avatar piece customization, live Leaderboard rankings, and external profile '
+                        'linking with automatic live stat syncing from Lichess and Chess.com public APIs.',
+                        className='feature-desc',
+                    ),
+                ], className='feature-card'),
+            ], className='tech-cards-grid'),
+        ])
+    else:
+        content = html.Div([
+            # Enterprise Hero Banner
+            html.Div([
+                html.P('DASH ENTERPRISE & PLOTLY CLOUD', className='eyebrow'),
+                html.H2('Why Plotly: A Production Platform IT Can Govern', style={'fontSize': '22px', 'marginBottom': '12px'}),
+                html.P(
+                    'Dash Enterprise is the secure production platform for organizations scaling AI-powered app development. '
+                    'Domain experts get one consistent way to deploy and run the data apps that improve decisions and workflows. '
+                    'IT keeps full control over who can access them, what they can reach and the resources they use.',
+                    style={'color': '#5a6662', 'fontSize': '13px', 'lineHeight': '1.7', 'margin': '0'},
+                ),
+            ], className='panel'),
+
+            # Compliance Badges
+            html.Div([
+                html.Span('🛡️ SOC 2 Type II', className='compliance-pill'),
+                html.Span('🔒 ISO 27001', className='compliance-pill'),
+                html.Span('📋 ISO 27701', className='compliance-pill'),
+                html.Span('🤖 ISO 42001', className='compliance-pill'),
+                html.Span('☁️ Runs in your cloud or air-gapped', className='compliance-pill'),
+                html.Span('🔑 SSO: Entra ID · Okta · SAML · OIDC · LDAP', className='compliance-pill'),
+            ], className='compliance-bar'),
+
+            # Questions IT Asks
+            html.Div([
+                html.H3('The Questions IT, Security and Risk Will Ask, Answered', style={'fontSize': '16px', 'margin': '0 0 6px'}),
+                html.P('Every point below is a platform capability, so each new app inherits it without extra code.',
+                       style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 16px'}),
+                html.Div([
+                    html.Div([
+                        html.Div('IDENTITY & ACCESS', className='qa-topic'),
+                        html.H4('Who can sign in, and who sees what?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('Single sign-on through your IdP: Entra ID, Okta, Ping, SAML 2.0, OIDC or LDAP/Active Directory.'),
+                                html.Li('Three roles: everyone is a viewer, licensed users build and deploy, admins run the platform. Map to IdP groups.'),
+                                html.Li('New apps start Restricted. Platform checks access before a request reaches the app, so no login code to write or audit.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('INFRASTRUCTURE & DATA', className='qa-topic'),
+                        html.H4('Where does it run, and does our data leave?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('One Helm install into a single namespace of your existing EKS, AKS or GKE cluster. No dedicated cluster needed.'),
+                                html.Li('Apps, users and data stay in your network, with fully air-gapped installs supported.'),
+                                html.Li('Apps reach databases and buckets through Kubernetes workload identity, so no credentials sit in code.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('APPLICATION SECURITY', className='qa-topic'),
+                        html.H4('Is the code and runtime hardened?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('App images in your private container registry; app code in your GitHub organisation under your review rules.'),
+                                html.Li('Read-only filesystems, seccomp profiles, and no sudo or privilege escalation by default.'),
+                                html.Li('Independent penetration testing; the summary and security pack are available via trust.plotly.com.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('AI AGENTS (MCP)', className='qa-topic'),
+                        html.H4('What can AI agents reach?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('Model Context Protocol (MCP) is off for every app until its owner or an admin explicitly turns it on.'),
+                                html.Li('Agents sign in as a real user and get exactly that user’s access, nothing more.'),
+                                html.Li('Teams can point Claude or Copilot at governed apps instead of exporting raw data to them.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('CONTINUITY', className='qa-topic'),
+                        html.H4('What happens when something breaks?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('Scheduled and on-demand backups to your own S3, Azure Blob or GCS bucket, optionally encrypted before upload.'),
+                                html.Li('Backups include SSO settings, users and groups; apps redeploy automatically after a restore.'),
+                                html.Li('Backup, restore and app operations run as durable workflows that resume after a node failure.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('COST & CAPACITY', className='qa-topic'),
+                        html.H4('Can one app take down the rest?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('Admins set CPU and memory limits per app, workspace and database; owners cannot raise their own.'),
+                                html.Li('An app that exceeds its memory limit is stopped, not left to starve the cluster.'),
+                                html.Li('Autoscaling runs only within the minimum and maximum replica counts you set.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('AUDIT & LIFECYCLE', className='qa-topic'),
+                        html.H4("Can we see everything, and what happens when people leave?", className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('One App Manager lists every app with its owner, co-owners, access groups, logs and viewer analytics.'),
+                                html.Li('Every deployment is a git commit with an author and a timestamp.'),
+                                html.Li("Admins transfer one or all of a leaver's apps, with databases, access and settings intact. No orphaned apps."),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+
+                    html.Div([
+                        html.Div('LICENSING', className='qa-topic'),
+                        html.H4('What does it cost as adoption grows?', className='qa-q'),
+                        html.Div([
+                            html.Ul([
+                                html.Li('No per-viewer fees: anyone in the company can use an app once it is shared.'),
+                                html.Li('Seats only for the people who build and own apps.'),
+                                html.Li('One platform for hundreds of apps, instead of one infrastructure project per app.'),
+                            ]),
+                        ], className='qa-a'),
+                    ], className='qa-card'),
+                ], className='qa-grid'),
+            ]),
+
+            # How an app goes from idea to governed production
+            html.Div([
+                html.H3('How an App Goes From Idea to Governed Production', style={'fontSize': '16px', 'margin': '24px 0 14px'}),
+                html.Div([
+                    html.Div([
+                        html.Div('01', className='lifecycle-num'),
+                        html.H4('Build', className='lifecycle-title'),
+                        html.P('In Plotly Studio, an AI coding tool or a browser workspace. Standard Python with all your favorite libraries.', className='lifecycle-desc'),
+                    ], className='lifecycle-card'),
+                    html.Div([
+                        html.Div('02', className='lifecycle-num'),
+                        html.H4('Deploy', className='lifecycle-title'),
+                        html.P('git push or one click. The platform automatically builds the container—no Dockerfile or DevOps tickets needed.', className='lifecycle-desc'),
+                    ], className='lifecycle-card'),
+                    html.Div([
+                        html.Div('03', className='lifecycle-num'),
+                        html.H4('Restrict', className='lifecycle-title'),
+                        html.P('The app is private and restricted by default. The owner shares access securely with IdP user groups.', className='lifecycle-desc'),
+                    ], className='lifecycle-card'),
+                    html.Div([
+                        html.Div('04', className='lifecycle-num'),
+                        html.H4('Operate', className='lifecycle-title'),
+                        html.P('Platform admins monitor resource usage, limits, audit logs, and viewer analytics in one centralized console.', className='lifecycle-desc'),
+                    ], className='lifecycle-card'),
+                    html.Div([
+                        html.Div('05', className='lifecycle-num'),
+                        html.H4('Extend to AI', className='lifecycle-title'),
+                        html.P('Optionally enable Model Context Protocol (MCP). AI assistants and agents inherit the exact same IdP permissions.', className='lifecycle-desc'),
+                    ], className='lifecycle-card'),
+                ], className='lifecycle-row'),
+            ]),
+
+            # Comparison Table
+            html.Div([
+                html.H3('Dashboards vs. DIY vs. A Governed App Platform', style={'fontSize': '16px', 'margin': '28px 0 6px'}),
+                html.P('Comparing traditional BI, self-hosted bespoke scripts, and Plotly Dash Enterprise.',
+                       style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 14px'}),
+                html.Div([
+                    html.Table([
+                        html.Thead([
+                            html.Tr([
+                                html.Th('CAPABILITY'),
+                                html.Th('Power BI / Tableau'),
+                                html.Th('DIY (Self-Hosted Apps)'),
+                                html.Th('Plotly Dash Enterprise', className='col-highlight'),
+                            ]),
+                        ]),
+                        html.Tbody([
+                            html.Tr([
+                                html.Td(html.Strong('Analytics logic')),
+                                html.Td('DAX and Power Query. Python visuals render as static images in a sandbox.'),
+                                html.Td('Anything Python can do.'),
+                                html.Td('Anything Python can do, running live in reactive callbacks. Models re-run on every interaction.', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong('Build speed')),
+                                html.Td('Fast for standard reports; custom logic hits a ceiling quickly.'),
+                                html.Td('Very fast with AI coding assistants (Claude, Copilot, Cursor).'),
+                                html.Td('Equally fast: AI coding tools, Plotly Studio, and browser App Workspaces all produce standard Dash code.', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong('Getting to production')),
+                                html.Td('Publish to the Power BI Service.'),
+                                html.Td('Every app becomes its own infra project: Docker, Kubernetes, TLS, reverse proxy, patching.'),
+                                html.Td('One-click deploy. Containerised and served for you in Plotly Cloud or on your own Kubernetes (AKS, EKS, GKE).', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong('Authentication')),
+                                html.Td('Entra ID.'),
+                                html.Td('Hand-rolled per app, and audited per app.'),
+                                html.Td('Configured once at platform level: Entra ID, Okta, SAML, LDAP. Every app inherits it.', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong('Licensing as adoption grows')),
+                                html.Td('Per-user (Pro / PPU) or capacity SKUs.'),
+                                html.Td('‘Free’ until you count the engineers maintaining it.'),
+                                html.Td('No per-viewer fees. Seats are only for people who build apps.', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong("Knowing what's running")),
+                                html.Td('Workspace administration.'),
+                                html.Td('Shadow apps on laptops, VMs and personal cloud accounts.'),
+                                html.Td('App Manager: every app’s owner, access groups, logs, env vars and viewer analytics in one place.', className='col-highlight'),
+                            ]),
+                            html.Tr([
+                                html.Td(html.Strong('Data residency & security')),
+                                html.Td('Vendor cloud tenancy.'),
+                                html.Td('Depends on whoever built it.'),
+                                html.Td('Runs in your VPC or behind your firewall. SOC 2 Type II, ISO 27001 / 27701 / 42001; pentest report via trust.plotly.com.', className='col-highlight'),
+                            ]),
+                        ]),
+                    ], className='matrix-table'),
+                ], className='matrix-wrapper'),
+            ]),
+
+            # Platform links & attribution
+            html.Div([
+                html.Span('Capabilities as documented for Dash Enterprise & Plotly Cloud · '),
+                html.A('dash.plotly.com/dash-enterprise', href='https://dash.plotly.com/dash-enterprise', target='_blank', rel='noopener noreferrer', style={'color': '#c56a49'}),
+                html.Span(' · Trust documentation via '),
+                html.A('trust.plotly.com', href='https://trust.plotly.com', target='_blank', rel='noopener noreferrer', style={'color': '#c56a49'}),
+                html.Span(' · Built with Plotly · '),
+                html.A('plotly.com', href='https://plotly.com', target='_blank', rel='noopener noreferrer', style={'color': '#c56a49'}),
+            ], style={'fontSize': '11px', 'color': '#7a827e', 'textAlign': 'center', 'padding': '14px 0', 'borderTop': '1px solid #e7e8e2'}),
+        ])
+
+    return html.Div(content, className='about-section')
 
 
 def render_room_status(mp):
@@ -541,14 +997,16 @@ def multiplayer_styles(mode, mp, hub=None, saved_games=None):
     )
 
 
-def create_app(app=None, hub=None, auth_store=None):
+def create_app(app=None, hub=None, auth_store=None, auth=None):
     ai = ChessAI(os.environ.get('PLOTLY_CHESS_MODEL'))
     hub = hub or DEFAULT_HUB
-    auth_store = auth_store or DEFAULT_AUTH
+    auth_store = auth_store or auth or DEFAULT_AUTH
     session_states = {}
     server_seq = 0
     if app is None:
-        app = Dash(__name__, assets_folder=str(Path(__file__).resolve().parent.parent/'assets'))
+        app = Dash(__name__, assets_folder=str(Path(__file__).resolve().parent.parent/'assets'), suppress_callback_exceptions=True)
+    else:
+        app.config.suppress_callback_exceptions = True
     attach_websocket(app.server, hub)
     app.title = 'Plotly Chess · A little room to think'
     board = chess.Board()
@@ -566,11 +1024,19 @@ def create_app(app=None, hub=None, auth_store=None):
                title='Return to game join screen',
                style={'background': 'none', 'border': '0', 'padding': '0', 'cursor': 'pointer'}),
             html.Span('A little room to think.', className='brand-note'),
+            html.Button([
+                html.Span(className='burger-bar'),
+                html.Span(className='burger-bar'),
+                html.Span(className='burger-bar'),
+            ], id='burger-menu-btn', type='button', className='burger-menu-btn',
+               **{'aria-label': 'Toggle navigation menu', 'aria-expanded': 'false'}),
             html.Div([
                 html.Button('🏠 Home', id='nav-play-btn', n_clicks=0, type='button',
                             className='button quiet', style={'display': 'none', 'padding': '6px 10px', 'fontSize': '11px'}),
                 html.Button('🏆 Leaderboard', id='nav-leaderboard-btn', n_clicks=0, type='button',
                             className='button secondary', style={'display': 'none', 'padding': '6px 10px', 'fontSize': '11px'}),
+                html.Button('⚡ Why Plotly & About', id='nav-about-btn', n_clicks=0, type='button',
+                            className='button quiet', style={'padding': '6px 11px', 'fontSize': '11px'}),
                 # Clickable User Avatar Dropdown Menu
                 html.Details([
                     html.Summary([
@@ -588,6 +1054,9 @@ def create_app(app=None, hub=None, auth_store=None):
                         html.Button('👤  My Profile', id='nav-profile-btn', n_clicks=0, type='button',
                                     className='button quiet',
                                     style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px'}),
+                        html.Button('⚡  Why Plotly & About', id='menu-about-btn', n_clicks=0, type='button',
+                                    className='button quiet',
+                                    style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px'}),
                         html.Button('↪  Switch account', id='auth-logout-btn', n_clicks=0, type='button',
                                     className='button quiet',
                                     style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px', 'color': '#c56a49'}),
@@ -598,7 +1067,7 @@ def create_app(app=None, hub=None, auth_store=None):
                         'display': 'flex', 'flexDirection': 'column', 'gap': '3px',
                     }),
                 ], id='user-menu', style={'position': 'relative', 'display': 'none'}),
-            ], style={'marginLeft': 'auto', 'display': 'flex', 'alignItems': 'center', 'gap': '8px'}),
+            ], id='site-nav', className='site-nav'),
         ], className='site-header'),
 
         # Pre-Home Welcome / Authentication Screen
@@ -650,80 +1119,89 @@ def create_app(app=None, hub=None, auth_store=None):
             html.Div('', id='profile-feedback', role='status', **{'aria-live': 'polite'},
                      style={'fontSize': '12px', 'fontWeight': '600', 'color': '#52674a', 'minHeight': '22px', 'marginBottom': '12px'}),
             html.Div([
-                # Left Column: Appearance & Password
+                # Profile Top Card & Stats
                 html.Div([
                     html.Div([
+                        html.Div(html.Img(src=piece_image('K'), alt='', id='profile-avatar-preview'), className='player-avatar',
+                                 style={'width': '54px', 'height': '54px'}),
                         html.Div([
-                            html.Div(html.Img(src=piece_image('K'), alt='', id='profile-avatar-preview'), className='player-avatar',
-                                     style={'width': '54px', 'height': '54px'}),
+                            html.Strong('Player', id='profile-header-name', style={'fontSize': '17px', 'display': 'block'}),
+                            html.Small('Contender · 1000 pts', id='profile-header-sub', style={'color': '#7a827e', 'fontSize': '12px'}),
+                        ]),
+                        html.Div(id='profile-friend-action-container', style={'marginLeft': 'auto'}),
+                    ], style={'display': 'flex', 'alignItems': 'center', 'gap': '14px', 'marginBottom': '16px'}),
+                    html.Div(id='profile-public-stats-container', style={'marginBottom': '16px'}),
+                ], className='panel', style={'marginBottom': '18px'}),
+
+                # Settings Section (Own Profile Only)
+                html.Div([
+                    # Left Column: Appearance & Password
+                    html.Div([
+                        html.Div([
+                            html.Label('DISPLAY NAME', htmlFor='profile-display-name', className='field-label'),
+                            dcc.Input(id='profile-display-name', type='text', value='', placeholder='Enter display name',
+                                      style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
+                                             'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '14px', 'background': '#fafbf8'}),
+                            html.Label('CHOOSE AVATAR PIECE', htmlFor='profile-avatar-select', className='field-label'),
+                            dcc.Dropdown(id='profile-avatar-select', options=AVATAR_OPTIONS, value='K',
+                                         clearable=False, searchable=False, style={'marginBottom': '16px'}),
+                            html.Button('Save profile changes', id='profile-save-btn', n_clicks=0, type='button',
+                                        className='button primary', style={'width': '100%'}),
+                        ], className='panel', style={'marginBottom': '18px'}),
+
+                        html.Div([
+                            html.H2('Change password', style={'marginBottom': '16px'}),
+                            html.Label('CURRENT PASSWORD', htmlFor='profile-current-password', className='field-label'),
+                            dcc.Input(id='profile-current-password', type='password', value='', placeholder='Current password',
+                                      style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
+                                             'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '12px', 'background': '#fafbf8'}),
+                            html.Label('NEW PASSWORD', htmlFor='profile-new-password', className='field-label'),
+                            dcc.Input(id='profile-new-password', type='password', value='', placeholder='New password (4+ chars)',
+                                      style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
+                                             'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '16px', 'background': '#fafbf8'}),
+                            html.Button('Update password', id='profile-password-btn', n_clicks=0, type='button',
+                                        className='button secondary', style={'width': '100%'}),
+                        ], className='panel'),
+                    ]),
+
+                    # Right Column: Link Lichess & Chess.com
+                    html.Div([
+                        html.Div([
                             html.Div([
-                                html.Strong('Player', id='profile-header-name', style={'fontSize': '17px', 'display': 'block'}),
-                                html.Small('Contender · 1000 pts', id='profile-header-sub', style={'color': '#7a827e', 'fontSize': '12px'}),
-                            ]),
-                        ], style={'display': 'flex', 'alignItems': 'center', 'gap': '14px', 'marginBottom': '20px'}),
-                        html.Label('DISPLAY NAME', htmlFor='profile-display-name', className='field-label'),
-                        dcc.Input(id='profile-display-name', type='text', value='', placeholder='Enter display name',
-                                  style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
-                                         'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '14px', 'background': '#fafbf8'}),
-                        html.Label('CHOOSE AVATAR PIECE', htmlFor='profile-avatar-select', className='field-label'),
-                        dcc.Dropdown(id='profile-avatar-select', options=AVATAR_OPTIONS, value='K',
-                                     clearable=False, searchable=False, style={'marginBottom': '16px'}),
-                        html.Button('Save profile changes', id='profile-save-btn', n_clicks=0, type='button',
-                                    className='button primary', style={'width': '100%'}),
-                    ], className='panel', style={'marginBottom': '18px'}),
+                                html.H2('Link Lichess Account'),
+                                html.Span('LIVE STATS SYNC', className='small-badge'),
+                            ], className='card-heading', style={'marginBottom': '10px'}),
+                            html.P('Connect your Lichess username to sync your rating, wins, losses and draws to your account and the Leaderboard.',
+                                   style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 12px', 'lineHeight': '1.5'}),
+                            html.Label('LICHESS USERNAME', htmlFor='profile-lichess-input', className='field-label'),
+                            html.Div([
+                                dcc.Input(id='profile-lichess-input', type='text', value='', placeholder='e.g. DrNykterstein',
+                                          style={'flex': '1', 'minWidth': '0', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
+                                                 'borderRadius': '6px', 'fontSize': '13px', 'background': '#fafbf8'}),
+                                html.Button('Link Lichess', id='profile-lichess-btn', n_clicks=0, type='button', className='button primary'),
+                            ], style={'display': 'flex', 'gap': '8px'}),
+                            html.Div(id='profile-lichess-status'),
+                        ], className='panel', style={'marginBottom': '18px'}),
 
-                    html.Div([
-                        html.H2('Change password', style={'marginBottom': '16px'}),
-                        html.Label('CURRENT PASSWORD', htmlFor='profile-current-password', className='field-label'),
-                        dcc.Input(id='profile-current-password', type='password', value='', placeholder='Current password',
-                                  style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
-                                         'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '12px', 'background': '#fafbf8'}),
-                        html.Label('NEW PASSWORD', htmlFor='profile-new-password', className='field-label'),
-                        dcc.Input(id='profile-new-password', type='password', value='', placeholder='New password (4+ chars)',
-                                  style={'width': '100%', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
-                                         'borderRadius': '6px', 'fontSize': '13px', 'marginBottom': '16px', 'background': '#fafbf8'}),
-                        html.Button('Update password', id='profile-password-btn', n_clicks=0, type='button',
-                                    className='button secondary', style={'width': '100%'}),
-                    ], className='panel'),
-                ]),
-
-                # Right Column: Link Lichess & Chess.com
-                html.Div([
-                    html.Div([
                         html.Div([
-                            html.H2('Link Lichess Account'),
-                            html.Span('LIVE STATS SYNC', className='small-badge'),
-                        ], className='card-heading', style={'marginBottom': '10px'}),
-                        html.P('Connect your Lichess username to sync your rating, wins, losses and draws to your account and the Leaderboard.',
-                               style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 12px', 'lineHeight': '1.5'}),
-                        html.Label('LICHESS USERNAME', htmlFor='profile-lichess-input', className='field-label'),
-                        html.Div([
-                            dcc.Input(id='profile-lichess-input', type='text', value='', placeholder='e.g. DrNykterstein',
-                                      style={'flex': '1', 'minWidth': '0', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
-                                             'borderRadius': '6px', 'fontSize': '13px', 'background': '#fafbf8'}),
-                            html.Button('Link Lichess', id='profile-lichess-btn', n_clicks=0, type='button', className='button primary'),
-                        ], style={'display': 'flex', 'gap': '8px'}),
-                        html.Div(id='profile-lichess-status'),
-                    ], className='panel', style={'marginBottom': '18px'}),
-
-                    html.Div([
-                        html.Div([
-                            html.H2('Link Chess.com Account'),
-                            html.Span('LIVE STATS SYNC', className='small-badge'),
-                        ], className='card-heading', style={'marginBottom': '10px'}),
-                        html.P('Connect your Chess.com username to fetch your published rapid/blitz rating and career W/L/D stats.',
-                               style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 12px', 'lineHeight': '1.5'}),
-                        html.Label('CHESS.COM USERNAME', htmlFor='profile-chesscom-input', className='field-label'),
-                        html.Div([
-                            dcc.Input(id='profile-chesscom-input', type='text', value='', placeholder='e.g. MagnusCarlsen',
-                                      style={'flex': '1', 'minWidth': '0', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
-                                             'borderRadius': '6px', 'fontSize': '13px', 'background': '#fafbf8'}),
-                            html.Button('Link Chess.com', id='profile-chesscom-btn', n_clicks=0, type='button', className='button primary'),
-                        ], style={'display': 'flex', 'gap': '8px'}),
-                        html.Div(id='profile-chesscom-status'),
-                    ], className='panel'),
-                ]),
-            ], style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px', 'alignItems': 'start'}),
+                            html.Div([
+                                html.H2('Link Chess.com Account'),
+                                html.Span('LIVE STATS SYNC', className='small-badge'),
+                            ], className='card-heading', style={'marginBottom': '10px'}),
+                            html.P('Connect your Chess.com username to fetch your published rapid/blitz rating and career W/L/D stats.',
+                                   style={'color': '#7a827e', 'fontSize': '12px', 'margin': '0 0 12px', 'lineHeight': '1.5'}),
+                            html.Label('CHESS.COM USERNAME', htmlFor='profile-chesscom-input', className='field-label'),
+                            html.Div([
+                                dcc.Input(id='profile-chesscom-input', type='text', value='', placeholder='e.g. MagnusCarlsen',
+                                          style={'flex': '1', 'minWidth': '0', 'padding': '9px 11px', 'border': '1px solid #e7e8e2',
+                                                 'borderRadius': '6px', 'fontSize': '13px', 'background': '#fafbf8'}),
+                                html.Button('Link Chess.com', id='profile-chesscom-btn', n_clicks=0, type='button', className='button primary'),
+                            ], style={'display': 'flex', 'gap': '8px'}),
+                            html.Div(id='profile-chesscom-status'),
+                        ], className='panel'),
+                    ]),
+                ], id='profile-settings-section', style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px', 'alignItems': 'start'}),
+            ]),
         ], id='profile-screen', style={'display': 'none', 'minHeight': '65vh'}),
 
         # Leaderboard Screen
@@ -738,6 +1216,33 @@ def create_app(app=None, hub=None, auth_store=None):
             ], className='page-intro'),
             html.Div(id='leaderboard-content'),
         ], id='leaderboard-screen', style={'display': 'none', 'minHeight': '65vh'}),
+
+        # About & Why Plotly Screen
+        html.Section([
+            html.Div([
+                html.Div([
+                    html.P('PRODUCTION DATA APPS · PLATFORM SHOWCASE', className='eyebrow'),
+                    html.H1('Why Plotly & About This App'),
+                ]),
+                html.Button('← Return to game', id='about-back-btn', n_clicks=0, type='button',
+                            className='button primary', style={'padding': '10px 18px'}),
+            ], className='page-intro'),
+            html.Div([
+                html.Button(
+                    '♟️  How Plotly Chess Was Built & Architecture',
+                    id='about-tab-tech-btn', n_clicks=0, type='button',
+                    className='button primary',
+                    style={'padding': '10px 18px', 'borderRadius': '7px', 'fontSize': '12px', 'cursor': 'pointer'},
+                ),
+                html.Button(
+                    '⚡  Why Plotly: Deploy, Scale, Govern (IT & Enterprise Platform)',
+                    id='about-tab-why-btn', n_clicks=0, type='button',
+                    className='button quiet',
+                    style={'padding': '10px 18px', 'borderRadius': '7px', 'fontSize': '12px', 'cursor': 'pointer'},
+                ),
+            ], style={'display': 'flex', 'gap': '10px', 'marginBottom': '26px', 'flexWrap': 'wrap'}),
+            html.Div(id='about-content'),
+        ], id='about-screen', style={'display': 'none', 'minHeight': '65vh'}),
 
         # Main Home Game Screen (shown after Login, Register, or Play as guest)
         html.Div([
@@ -847,9 +1352,39 @@ def create_app(app=None, hub=None, auth_store=None):
                               html.Span('NPC expert routing' if ai.router else 'Material search', id='engine-label')], className='engine-label'),
                 ], className='game-sidebar'),
             ], id='game-layout', className='game-layout'),
+
+            # Completed Multiplayer Games Community Feed
+            html.Section([
+                html.Div([
+                    html.H2('Recent Multiplayer Matches', style={'fontSize': '15px', 'fontWeight': '700', 'margin': '0'}),
+                    html.Span('Live Community Feed · Click any player to view profile', className='muted', style={'fontSize': '11px'}),
+                ], className='card-heading', style={'marginBottom': '10px', 'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center'}),
+                html.Div(render_recent_games([]), id='recent-games-feed'),
+            ], className='panel recent-games-panel', id='recent-games-panel'),
         ], id='home-screen', style={'display': 'none'}),
 
-        html.Footer([html.Span('Less distraction. More chess.'), html.Span('Built with Python · Made for your next move.')]),
+        # Floating Friends Widget (Visible on every screen)
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.Span('👥  Friends', className='friends-box-title'),
+                    html.Button('✕', id='friends-close-btn', type='button', className='friends-close-btn', title='Close'),
+                ], className='friends-box-header'),
+                html.Div(render_friends_widget_content([], None), id='friends-widget-content'),
+            ], id='friends-widget', className='friends-box'),
+            html.Button([
+                html.Span('👥 Friends'),
+                html.Span('0 online', id='friends-online-badge', className='friends-online-badge'),
+            ], id='friends-toggle-btn', type='button', className='friends-toggle-btn', title='Toggle friends list'),
+        ], className='friends-widget-container', id='friends-widget-container'),
+
+        html.Footer([
+            html.Span('Less distraction. More chess.'),
+            html.Div([
+                html.Span('Built with Python & Plotly Dash · '),
+                html.Button('Why Plotly & Architecture ↗', id='footer-about-btn', n_clicks=0, type='button', className='footer-link-btn'),
+            ], style={'display': 'flex', 'alignItems': 'center', 'gap': '6px'}),
+        ]),
     ], className='app-container')
 
     @app.callback(
@@ -873,6 +1408,12 @@ def create_app(app=None, hub=None, auth_store=None):
         Output('active-games-list', 'children'), Output('active-games-count', 'children'),
         Output('play-area', 'style'), Output('game-layout', 'style'),
         Output('board-controls', 'style'), Output('history-panel', 'style'), Output('options-panel', 'style'),
+        Output('about-screen', 'style'), Output('about-content', 'children'), Output('nav-about-btn', 'style'),
+        Output('about-tab-tech-btn', 'className'), Output('about-tab-why-btn', 'className'),
+        Output('profile-friend-action-container', 'children'), Output('profile-public-stats-container', 'children'),
+        Output('profile-settings-section', 'style'),
+        Output('recent-games-feed', 'children'),
+        Output('friends-widget-content', 'children'), Output('friends-online-badge', 'children'),
         Input('board-action', 'data'), Input('play', 'n_clicks'), Input('reset', 'n_clicks'),
         Input('hint', 'n_clicks'), Input('mode', 'value'),
         Input('mp-host-btn', 'n_clicks'), Input('mp-create-btn', 'n_clicks'), Input('mp-choose-join-btn', 'n_clicks'),
@@ -888,6 +1429,9 @@ def create_app(app=None, hub=None, auth_store=None):
         Input('profile-save-btn', 'n_clicks'), Input('profile-password-btn', 'n_clicks'),
         Input('profile-lichess-btn', 'n_clicks'), Input('profile-chesscom-btn', 'n_clicks'),
         Input('brand-home-btn', 'n_clicks'),
+        Input('nav-about-btn', 'n_clicks'), Input('footer-about-btn', 'n_clicks'),
+        Input('menu-about-btn', 'n_clicks'), Input('about-back-btn', 'n_clicks'),
+        Input('about-tab-tech-btn', 'n_clicks'), Input('about-tab-why-btn', 'n_clicks'),
         State('notation', 'value'), State('promotion', 'value'), State('game', 'data'),
         State('join-code-input', 'value'), State('auth-username', 'value'), State('auth-password', 'value'),
         State('profile-display-name', 'value'), State('profile-avatar-select', 'value'),
@@ -901,6 +1445,8 @@ def create_app(app=None, hub=None, auth_store=None):
                nav_lb_clicks, nav_play_clicks, lb_back_clicks,
                nav_prof_clicks, prof_back_clicks, prof_save_clicks, prof_pw_clicks,
                prof_lichess_clicks, prof_chesscom_clicks, brand_home_clicks,
+               nav_about_clicks, footer_about_clicks, menu_about_clicks, about_back_clicks,
+               about_tab_tech_clicks, about_tab_why_clicks,
                notation, promotion, state, join_code, auth_username, auth_password,
                prof_display_name, prof_avatar, prof_curr_pw, prof_new_pw,
                prof_lichess_user, prof_chesscom_user):
@@ -1057,10 +1603,24 @@ def create_app(app=None, hub=None, auth_store=None):
             if mp.get('code'):
                 in_lobby = True
                 mp = {'view': 'choice'}
-            state = {**state, 'mp': mp, 'page': page, 'in_lobby': in_lobby, 'left_code': prev_code, 'saved_games': saved_games}
-        elif trigger in ('leaderboard-back-btn', 'profile-back-btn'):
+            state = {**state, 'mp': mp, 'page': page, 'in_lobby': in_lobby, 'left_code': prev_code, 'saved_games': saved_games, 'viewed_profile': auth['username'] if auth and auth.get('role') == 'user' else None}
+        elif trigger in ('leaderboard-back-btn', 'profile-back-btn', 'about-back-btn'):
             page = 'home'
-            state = {**state, 'page': page}
+            state = {**state, 'page': page, 'viewed_profile': None}
+        elif trigger in ('nav-about-btn', 'footer-about-btn', 'menu-about-btn'):
+            prev_code = mp.get('code') or state.get('left_code') or url_code
+            saved_games = _SnapshotCurrentIntoSaved(mode, state, saved_games, hub)
+            page = 'about'
+            if mp.get('code'):
+                in_lobby = True
+                mp = {'view': 'choice'}
+            state = {**state, 'mp': mp, 'page': page, 'in_lobby': in_lobby, 'left_code': prev_code, 'saved_games': saved_games}
+        elif trigger == 'about-tab-tech-btn':
+            page = 'about'
+            state = {**state, 'page': page, 'about_subtab': 'tech'}
+        elif trigger == 'about-tab-why-btn':
+            page = 'about'
+            state = {**state, 'page': page, 'about_subtab': 'why'}
         elif trigger == 'profile-save-btn':
             page = 'profile'
             try:
@@ -1116,11 +1676,11 @@ def create_app(app=None, hub=None, auth_store=None):
             if mode == 'multiplayer' and mp.get('view') == 'find' and not mp.get('code'):
                 message = 'Showing open games waiting for players.'
             elif mode != 'multiplayer' or not mp.get('code'):
-                return (no_update,) * 48
+                return (no_update,) * 53
             else:
                 live = hub.get_room(mp['code'], mp.get('token'))
                 if not live or (live['version'] == mp.get('version') and live['connected'] == mp.get('connected')):
-                    return (no_update,) * 48
+                    return (no_update,) * 53
                 mp = {'view': 'room', **live}
                 state = {**state, 'moves': live['moves'], 'selected': state.get('selected'), 'mp': mp}
                 message = live['message']
@@ -1128,6 +1688,7 @@ def create_app(app=None, hub=None, auth_store=None):
         elif mode == 'multiplayer' and mp.get('code') and trigger not in (
             None, 'url', 'mp-host-btn', 'mp-create-btn', 'mp-leave-btn', 'mp-tab-lobby-btn', 'mp-tab-find-btn',
             'mode', 'auth-logout-btn', 'brand-home-btn', 'nav-play-btn', 'nav-profile-btn', 'nav-leaderboard-btn',
+            'nav-about-btn', 'footer-about-btn', 'menu-about-btn', 'about-back-btn', 'about-tab-tech-btn', 'about-tab-why-btn',
         ):
             live = hub.get_room(mp['code'], mp.get('token'))
             if live:
@@ -1206,7 +1767,13 @@ def create_app(app=None, hub=None, auth_store=None):
                 mode = 'multiplayer'
                 page = 'home'
                 in_lobby = False
-                snap = hub.create_room(host_name=host_display, host_rank=host_rank_label, host_avatar=host_avatar_sym, is_public=True)
+                snap = hub.create_room(
+                    host_name=host_display,
+                    host_rank=host_rank_label,
+                    host_avatar=host_avatar_sym,
+                    is_public=True,
+                    host_user=auth['username'] if auth and auth.get('role') == 'user' else None,
+                )
                 mp = {'view': 'room', **snap}
                 state = {**state, 'moves': snap['moves'], 'selected': None, 'mp': mp, 'page': page, 'in_lobby': False, 'left_code': url_code, 'recorded_game_key': None}
                 message = snap['message']
@@ -1258,7 +1825,10 @@ def create_app(app=None, hub=None, auth_store=None):
                         if g.get('code') == cleaned_join and g.get('token'):
                             existing_token = g['token']
                             break
-                snap = hub.join_room(cleaned_join, existing_token)
+                guest_u = auth['username'] if auth and auth.get('role') == 'user' else None
+                guest_disp = (auth.get('display_name') or auth['username']) if guest_u else 'Friend'
+                guest_av = (auth.get('avatar') or 'k') if guest_u else 'k'
+                snap = hub.join_room(cleaned_join, existing_token, guest_name=guest_disp, guest_user=guest_u, guest_avatar=guest_av)
                 mp = {'view': 'room', **snap}
                 state = {**state, 'moves': snap['moves'], 'selected': None, 'mp': mp, 'page': page, 'in_lobby': False, 'left_code': url_code, 'recorded_game_key': None}
                 message = snap['message']
@@ -1404,7 +1974,13 @@ def create_app(app=None, hub=None, auth_store=None):
                     mode = 'multiplayer'
                     page = 'home'
                     in_lobby = False
-                    snap = hub.create_room(host_name=host_display, host_rank=host_rank_label, host_avatar=host_avatar_sym, is_public=True)
+                    snap = hub.create_room(
+                    host_name=host_display,
+                    host_rank=host_rank_label,
+                    host_avatar=host_avatar_sym,
+                    is_public=True,
+                    host_user=auth['username'] if auth and auth.get('role') == 'user' else None,
+                )
                     mp = {'view': 'room', **snap}
                     state = {**state, 'moves': snap['moves'], 'selected': None, 'mp': mp, 'page': page, 'in_lobby': False, 'left_code': url_code, 'recorded_game_key': None}
                     message = snap['message']
@@ -1437,7 +2013,10 @@ def create_app(app=None, hub=None, auth_store=None):
                             if g.get('code') == cleaned_code and g.get('token'):
                                 existing_token = g['token']
                                 break
-                    snap = hub.join_room(cleaned_code, existing_token)
+                    guest_u = auth['username'] if auth and auth.get('role') == 'user' else None
+                    guest_disp = (auth.get('display_name') or auth['username']) if guest_u else 'Friend'
+                    guest_av = (auth.get('avatar') or 'k') if guest_u else 'k'
+                    snap = hub.join_room(cleaned_code, existing_token, guest_name=guest_disp, guest_user=guest_u, guest_avatar=guest_av)
                     mp = {'view': 'room', **snap}
                     state = {**state, 'moves': snap['moves'], 'selected': None, 'mp': mp, 'page': page, 'in_lobby': False, 'left_code': url_code, 'recorded_game_key': None}
                     message = snap['message']
@@ -1457,6 +2036,26 @@ def create_app(app=None, hub=None, auth_store=None):
                             mp = {'view': 'room', **snap}
                             state = {**state, 'moves': snap['moves'], 'selected': state.get('selected'), 'mp': mp}
                             message = snap['message']
+                elif kind == 'view-profile':
+                    page = 'profile'
+                    prev_code = mp.get('code') or state.get('left_code') or url_code
+                    saved_games = _SnapshotCurrentIntoSaved(mode, state, saved_games, hub)
+                    if mp.get('code'):
+                        in_lobby = True
+                        mp = {'view': 'choice'}
+                    state = {**state, 'mp': mp, 'page': page, 'in_lobby': in_lobby, 'left_code': prev_code, 'saved_games': saved_games, 'viewed_profile': action.get('username')}
+                elif kind == 'toggle-friend':
+                    friend_target = (action.get('username') or '').strip().lower()
+                    if auth and auth.get('role') == 'user' and friend_target:
+                        if auth_store.is_friend(auth['username'], friend_target):
+                            auth_store.remove_friend(auth['username'], friend_target)
+                            profile_feedback = f"Removed @{friend_target} from friends."
+                        else:
+                            try:
+                                auth_store.add_friend(auth['username'], friend_target)
+                                profile_feedback = f"Added @{friend_target} as a friend!"
+                            except Exception as ex:
+                                profile_feedback = str(ex)
                 elif kind == 'click':
                     page = 'home'
                     in_lobby = False
@@ -1574,6 +2173,7 @@ def create_app(app=None, hub=None, auth_store=None):
                         message += f' Rating updated: {auth["rating"]} ({auth["rank"]}).'
 
         if auth and auth.get('role') == 'user':
+            auth_store.touch_user_activity(auth['username'])
             fresh = auth_store.save_user_games(auth['username'], saved_games) or auth_store.get_profile(auth['username'])
             if fresh:
                 auth = fresh
@@ -1641,10 +2241,15 @@ def create_app(app=None, hub=None, auth_store=None):
         search_out = no_update if is_browser_premount else (target_search if (url_search or '') != target_search else no_update)
 
         is_authenticated = bool(auth)
-        auth_screen_style = {'display': 'none'} if is_authenticated else {'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'minHeight': '65vh'}
+        auth_screen_style = {'display': 'none'} if (is_authenticated or page == 'about') else {'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'minHeight': '65vh'}
         home_screen_style = {'display': 'block'} if (is_authenticated and page == 'home') else {'display': 'none'}
         leaderboard_screen_style = {'display': 'block', 'minHeight': '65vh'} if (is_authenticated and page == 'leaderboard') else {'display': 'none'}
         profile_screen_style = {'display': 'block', 'minHeight': '65vh'} if (is_authenticated and page == 'profile') else {'display': 'none'}
+        about_subtab = state.get('about_subtab', 'tech')
+        about_screen_style = {'display': 'block', 'minHeight': '65vh'} if page == 'about' else {'display': 'none'}
+        about_children = render_about_content(about_subtab) if page == 'about' else []
+        about_tech_class = 'button primary' if about_subtab == 'tech' else 'button quiet'
+        about_why_class = 'button primary' if about_subtab == 'why' else 'button quiet'
         leaderboard_children = render_leaderboard_content(auth_store.leaderboard(), auth) if (is_authenticated and page == 'leaderboard') else []
 
         if auth and auth.get('role') == 'user':
@@ -1656,13 +2261,88 @@ def create_app(app=None, hub=None, auth_store=None):
 
         btn_base = {'padding': '6px 10px', 'fontSize': '11px'}
         user_menu_style = {'position': 'relative', 'display': 'inline-block'} if is_authenticated else {'display': 'none'}
-        nav_play_style = {**btn_base, 'display': 'inline-block'} if (is_authenticated and (page != 'home' or not in_lobby)) else {'display': 'none'}
+        nav_play_style = {**btn_base, 'display': 'inline-block'} if ((is_authenticated and (page != 'home' or not in_lobby)) or page == 'about') else {'display': 'none'}
         nav_lb_style = {**btn_base, 'display': 'inline-block'} if is_authenticated else {'display': 'none'}
+        nav_about_style = {**btn_base, 'display': 'inline-block'}
 
         avatar_img = piece_image(user_avatar)
-        prof_name_text = display_name if is_authenticated else 'Guest'
-        prof_sub_text = (f'@{auth["username"]} · {auth["rank"]} · {auth["rating"]} pts'
-                         if auth and auth.get('role') == 'user' else 'Guest session')
+
+        # Profile view computation
+        viewed_username = (state.get('viewed_profile') or '').strip().lower()
+        my_username = (auth.get('username') or '').strip().lower() if auth and auth.get('role') == 'user' else ''
+        is_viewing_other = bool(viewed_username and viewed_username != my_username)
+
+        if is_viewing_other:
+            other_prof = auth_store.get_profile(viewed_username)
+            if other_prof:
+                prof_avatar_img = piece_image(other_prof.get('avatar', 'K'))
+                prof_name_text = f"{other_prof['display_name']} (@{other_prof['username']})"
+                prof_sub_text = f"{other_prof['rank']} · {other_prof['rating']} pts"
+                is_friend = auth_store.is_friend(auth['username'], other_prof['username']) if auth and auth.get('role') == 'user' else False
+                if auth and auth.get('role') == 'user':
+                    if is_friend:
+                        profile_friend_action = html.Button('✓ Friends (Click to Remove)', type='button',
+                                                            className='profile-friend-btn is-friend',
+                                                            **{'data-toggle-friend': other_prof['username']})
+                    else:
+                        profile_friend_action = html.Button('➕ Add Friend', type='button',
+                                                            className='profile-friend-btn',
+                                                            **{'data-toggle-friend': other_prof['username']})
+                else:
+                    profile_friend_action = html.Small('Log in to add this player as a friend.', style={'color': '#78847e'})
+
+                tot = other_prof.get('games', 0)
+                win_pct = f"{(other_prof['wins'] / tot * 100):.0f}%" if tot else "—"
+                profile_public_stats = html.Div([
+                    html.Div([
+                        html.Div([html.Span('RECORD', className='field-label'), html.Strong(f"{other_prof['wins']}W · {other_prof['losses']}L · {other_prof['draws']}D", style={'fontSize': '13px', 'color': '#2a362f'})]),
+                        html.Div([html.Span('TOTAL GAMES', className='field-label'), html.Strong(str(tot), style={'fontSize': '13px', 'color': '#2a362f'})]),
+                        html.Div([html.Span('WIN RATE', className='field-label'), html.Strong(win_pct, style={'fontSize': '13px', 'color': '#2e7d32'})]),
+                    ], style={'display': 'flex', 'gap': '20px', 'padding': '12px 14px', 'background': '#f9faf6', 'borderRadius': '8px', 'marginBottom': '14px'}),
+                    _external_badges(other_prof),
+                ])
+                profile_settings_style = {'display': 'none'}
+            else:
+                prof_avatar_img = piece_image(user_avatar)
+                prof_name_text = f"Player @{viewed_username}"
+                prof_sub_text = "Profile not found"
+                profile_friend_action = None
+                profile_public_stats = html.Div('User not found.')
+                profile_settings_style = {'display': 'none'}
+        else:
+            prof_avatar_img = piece_image(user_avatar)
+            prof_name_text = display_name if is_authenticated else 'Guest'
+            prof_sub_text = (f'@{auth["username"]} · {auth["rank"]} · {auth["rating"]} pts'
+                             if auth and auth.get('role') == 'user' else 'Guest session')
+
+            my_friends = auth_store.get_friends(auth['username']) if auth and auth.get('role') == 'user' else []
+            online_fr_count = len([f for f in my_friends if f.get('is_online')])
+            profile_friend_action = html.Span(
+                f"👥 {len(my_friends)} Friends ({online_fr_count} online)" if auth and auth.get('role') == 'user' else 'Guest Account',
+                style={'fontSize': '12px', 'fontWeight': '600', 'color': '#4a564e', 'background': '#edf1e8', 'padding': '6px 12px', 'borderRadius': '16px'}
+            )
+
+            tot = (auth or {}).get('games', 0)
+            win_pct = f"{(auth.get('wins', 0) / tot * 100):.0f}%" if tot else "—"
+            profile_public_stats = html.Div([
+                html.Div([
+                    html.Div([html.Span('RECORD', className='field-label'), html.Strong(f"{auth.get('wins', 0)}W · {auth.get('losses', 0)}L · {auth.get('draws', 0)}D", style={'fontSize': '13px', 'color': '#2a362f'})]),
+                    html.Div([html.Span('TOTAL GAMES', className='field-label'), html.Strong(str(tot), style={'fontSize': '13px', 'color': '#2a362f'})]),
+                    html.Div([html.Span('WIN RATE', className='field-label'), html.Strong(win_pct, style={'fontSize': '13px', 'color': '#2e7d32'})]),
+                ], style={'display': 'flex', 'gap': '20px', 'padding': '12px 14px', 'background': '#f9faf6', 'borderRadius': '8px', 'marginBottom': '14px'}),
+            ]) if auth and auth.get('role') == 'user' else html.Div()
+
+            profile_settings_style = {'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px', 'alignItems': 'start'}
+
+        # Match feed and friends widget
+        recent_games = hub.get_recent_completed_games(limit=6)
+        recent_games_children = render_recent_games(recent_games)
+
+        friends_list = auth_store.get_friends(auth['username']) if auth and auth.get('role') == 'user' else []
+        friends_widget_children = render_friends_widget_content(friends_list, auth)
+        online_fr = [f for f in friends_list if f.get('is_online')]
+        friends_badge_text = f"{len(online_fr)} online" if (auth and auth.get('role') == 'user') else "Offline"
+
         lichess_box = render_external_account_box('Lichess', (auth or {}).get('lichess'))
         chesscom_box = render_external_account_box('Chess.com', (auth or {}).get('chesscom'))
 
@@ -1718,7 +2398,7 @@ def create_app(app=None, hub=None, auth_store=None):
             profile_screen_style,
             profile_feedback,
             avatar_img,
-            avatar_img,
+            prof_avatar_img,
             prof_name_text,
             prof_sub_text,
             display_name if is_authenticated else '',
@@ -1732,5 +2412,16 @@ def create_app(app=None, hub=None, auth_store=None):
             board_controls_style,
             history_panel_style,
             options_panel_style,
+            about_screen_style,
+            about_children,
+            nav_about_style,
+            about_tech_class,
+            about_why_class,
+            profile_friend_action,
+            profile_public_stats,
+            profile_settings_style,
+            recent_games_children,
+            friends_widget_children,
+            friends_badge_text,
         )
     return app

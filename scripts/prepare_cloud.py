@@ -37,6 +37,7 @@ def main():
     print(f'Upload folder: {destination}')
     print('Upload its contents, preserving the assets/ and plotly_chess/ folders.')
     print('Choose app.py as the main file and Python 3.11.')
+    print('Persistent filesystem: automatically detects "Games" mount (or GAMES_DIR).')
     if args.model:
         print('Set the Cloud environment variable PLOTLY_CHESS_MODEL=chess-npc.npz')
     else:

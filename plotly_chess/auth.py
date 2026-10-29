@@ -8,6 +8,7 @@ import sqlite3
 import ssl
 import tempfile
 import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -184,6 +185,7 @@ _EXTRA_COLUMNS = (
     ("chesscom_losses", "INTEGER NOT NULL DEFAULT 0"),
     ("chesscom_draws", "INTEGER NOT NULL DEFAULT 0"),
     ("saved_games_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("last_active", "REAL NOT NULL DEFAULT 0"),
 )
 
 
@@ -193,19 +195,32 @@ class AuthStore:
     def __init__(self, shared=False, db_path=None, http_get=None):
         self._lock = threading.Lock()
         self._memory_users = {}
+        self._memory_friends = set()
+        self._memory_activity = {}
         self._http_get = http_get
         if db_path is not None:
             self._db_path = Path(db_path)
         elif shared:
-            self._db_path = Path(tempfile.gettempdir()) / "plotly_chess_users.sqlite3"
+            from .storage import get_cloud_storage_dir
+            cloud_dir = get_cloud_storage_dir("Games")
+            if cloud_dir is not None:
+                self._db_path = cloud_dir / "plotly_chess_users.sqlite3"
+            else:
+                self._db_path = Path(tempfile.gettempdir()) / "plotly_chess_users.sqlite3"
         else:
             self._db_path = None
         if self._db_path:
             self._init_db()
 
     def _connect_db(self):
-        conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+        conn = sqlite3.connect(str(self._db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA busy_timeout=10000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
         return conn
 
     def _init_db(self):
@@ -234,7 +249,18 @@ class AuthStore:
                         chesscom_wins INTEGER NOT NULL DEFAULT 0,
                         chesscom_losses INTEGER NOT NULL DEFAULT 0,
                         chesscom_draws INTEGER NOT NULL DEFAULT 0,
-                        saved_games_json TEXT NOT NULL DEFAULT '[]'
+                        saved_games_json TEXT NOT NULL DEFAULT '[]',
+                        last_active REAL NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS friends (
+                        user_id TEXT NOT NULL,
+                        friend_id TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY (user_id, friend_id)
                     )
                     """
                 )
@@ -510,6 +536,144 @@ class AuthStore:
             for idx, profile in enumerate(profiles[:limit], start=1):
                 result.append({**profile, "position": idx})
             return result
+
+    def touch_user_activity(self, username):
+        """Update last active timestamp for online presence detection."""
+        key = (username or "").strip().lower()
+        if not key:
+            return
+        now = time.time()
+        with self._lock:
+            self._memory_activity[key] = now
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        conn.execute("UPDATE users SET last_active = ? WHERE username_key = ?", (now, key))
+                except sqlite3.Error:
+                    pass
+
+    def is_online(self, username, max_inactive=120.0):
+        """Check whether a user was active within max_inactive seconds."""
+        key = (username or "").strip().lower()
+        if not key:
+            return False
+        now = time.time()
+        with self._lock:
+            ts = self._memory_activity.get(key)
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        row = conn.execute("SELECT last_active FROM users WHERE username_key = ?", (key,)).fetchone()
+                        if row and row["last_active"]:
+                            db_ts = float(row["last_active"])
+                            if ts is None or db_ts > ts:
+                                ts = db_ts
+                except sqlite3.Error:
+                    pass
+            return bool(ts and (now - ts) <= max_inactive)
+
+    def add_friend(self, username, friend_username):
+        """Add friend_username to username's friends list."""
+        u_key = (username or "").strip().lower()
+        f_key = (friend_username or "").strip().lower()
+        if not u_key or not f_key:
+            raise ValueError("Invalid user.")
+        if u_key == f_key:
+            raise ValueError("You cannot add yourself as a friend.")
+        with self._lock:
+            u_rec = self._get_user_locked(u_key)
+            f_rec = self._get_user_locked(f_key)
+            if not u_rec:
+                raise ValueError("User account not found.")
+            if not f_rec:
+                raise ValueError(f"Player '{friend_username}' does not exist.")
+            now = time.time()
+            self._memory_friends.add((u_key, f_key))
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO friends (user_id, friend_id, created_at)
+                            VALUES (?, ?, ?)
+                            """,
+                            (u_key, f_key, now),
+                        )
+                except sqlite3.Error:
+                    pass
+            return True
+
+    def remove_friend(self, username, friend_username):
+        """Remove friend_username from username's friends list."""
+        u_key = (username or "").strip().lower()
+        f_key = (friend_username or "").strip().lower()
+        if not u_key or not f_key:
+            return False
+        with self._lock:
+            self._memory_friends.discard((u_key, f_key))
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        conn.execute(
+                            "DELETE FROM friends WHERE user_id = ? AND friend_id = ?",
+                            (u_key, f_key),
+                        )
+                except sqlite3.Error:
+                    pass
+            return True
+
+    def is_friend(self, username, friend_username):
+        """Check if username and friend_username are friends."""
+        u_key = (username or "").strip().lower()
+        f_key = (friend_username or "").strip().lower()
+        if not u_key or not f_key:
+            return False
+        with self._lock:
+            if (u_key, f_key) in self._memory_friends:
+                return True
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        row = conn.execute(
+                            "SELECT 1 FROM friends WHERE user_id = ? AND friend_id = ?",
+                            (u_key, f_key),
+                        ).fetchone()
+                        if row:
+                            self._memory_friends.add((u_key, f_key))
+                            return True
+                except sqlite3.Error:
+                    pass
+            return False
+
+    def get_friends(self, username):
+        """Return list of friend profiles for username with online status."""
+        u_key = (username or "").strip().lower()
+        if not u_key:
+            return []
+        friend_keys = set()
+        with self._lock:
+            for u, f in self._memory_friends:
+                if u == u_key:
+                    friend_keys.add(f)
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        rows = conn.execute("SELECT friend_id FROM friends WHERE user_id = ?", (u_key,)).fetchall()
+                        for row in rows:
+                            fk = row["friend_id"]
+                            friend_keys.add(fk)
+                            self._memory_friends.add((u_key, fk))
+                except sqlite3.Error:
+                    pass
+        friends = []
+        for fk in friend_keys:
+            prof = self.get_profile(fk)
+            if prof:
+                online = self.is_online(fk)
+                friends.append({**prof, "is_online": online})
+        # Sort online friends first, then by rating descending, then display name
+        friends.sort(key=lambda f: (0 if f["is_online"] else 1, -f["rating"], f["display_name"].lower()))
+        return friends
 
     @staticmethod
     def guest():

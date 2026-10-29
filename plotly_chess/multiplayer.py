@@ -102,18 +102,30 @@ class MultiplayerHub:
         self._rooms = {}
         self._sessions = {}
         self._clients = {}
+        self._memory_completed_games = []
         if db_path is not None:
             self._db_path = Path(db_path)
         elif shared:
-            self._db_path = Path(tempfile.gettempdir()) / "plotly_chess_rooms.sqlite3"
+            from .storage import get_cloud_storage_dir
+            cloud_dir = get_cloud_storage_dir("Games")
+            if cloud_dir is not None:
+                self._db_path = cloud_dir / "plotly_chess_rooms.sqlite3"
+            else:
+                self._db_path = Path(tempfile.gettempdir()) / "plotly_chess_rooms.sqlite3"
         else:
             self._db_path = None
         if self._db_path:
             self._init_db()
 
     def _connect_db(self):
-        conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+        conn = sqlite3.connect(str(self._db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA busy_timeout=10000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
         return conn
 
     def _init_db(self):
@@ -140,6 +152,10 @@ class MultiplayerHub:
                     "ALTER TABLE rooms ADD COLUMN host_rank TEXT NOT NULL DEFAULT 'Contender (1000)'",
                     "ALTER TABLE rooms ADD COLUMN host_avatar TEXT NOT NULL DEFAULT 'K'",
                     "ALTER TABLE rooms ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1",
+                    "ALTER TABLE rooms ADD COLUMN host_user TEXT",
+                    "ALTER TABLE rooms ADD COLUMN guest_name TEXT NOT NULL DEFAULT 'Friend'",
+                    "ALTER TABLE rooms ADD COLUMN guest_user TEXT",
+                    "ALTER TABLE rooms ADD COLUMN guest_avatar TEXT NOT NULL DEFAULT 'k'",
                 ):
                     try:
                         conn.execute(col_sql)
@@ -151,6 +167,24 @@ class MultiplayerHub:
                         sid TEXT PRIMARY KEY,
                         state_json TEXT NOT NULL,
                         updated_at REAL NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS completed_games (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        code TEXT NOT NULL,
+                        white_name TEXT NOT NULL,
+                        white_user TEXT,
+                        white_avatar TEXT NOT NULL DEFAULT 'K',
+                        black_name TEXT NOT NULL,
+                        black_user TEXT,
+                        black_avatar TEXT NOT NULL DEFAULT 'k',
+                        result TEXT NOT NULL,
+                        result_desc TEXT NOT NULL,
+                        moves_count INTEGER NOT NULL DEFAULT 0,
+                        completed_at REAL NOT NULL
                     )
                     """
                 )
@@ -219,6 +253,10 @@ class MultiplayerHub:
             "host_name": row["host_name"] if "host_name" in keys else "Player",
             "host_rank": row["host_rank"] if "host_rank" in keys else "Contender (1000)",
             "host_avatar": row["host_avatar"] if "host_avatar" in keys else "K",
+            "host_user": row["host_user"] if "host_user" in keys else None,
+            "guest_name": row["guest_name"] if "guest_name" in keys else "Friend",
+            "guest_user": row["guest_user"] if "guest_user" in keys else None,
+            "guest_avatar": row["guest_avatar"] if "guest_avatar" in keys else "k",
             "is_public": bool(row["is_public"]) if "is_public" in keys else True,
         }
 
@@ -244,9 +282,10 @@ class MultiplayerHub:
                         """
                         INSERT INTO rooms (
                             code, white_token, black_token, moves_json, version, message,
-                            host_name, host_rank, host_avatar, is_public
+                            host_name, host_rank, host_avatar, is_public,
+                            host_user, guest_name, guest_user, guest_avatar
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(code) DO UPDATE SET
                             white_token=excluded.white_token,
                             black_token=excluded.black_token,
@@ -256,7 +295,11 @@ class MultiplayerHub:
                             host_name=excluded.host_name,
                             host_rank=excluded.host_rank,
                             host_avatar=excluded.host_avatar,
-                            is_public=excluded.is_public
+                            is_public=excluded.is_public,
+                            host_user=excluded.host_user,
+                            guest_name=excluded.guest_name,
+                            guest_user=excluded.guest_user,
+                            guest_avatar=excluded.guest_avatar
                         """,
                         (
                             room["code"],
@@ -269,6 +312,10 @@ class MultiplayerHub:
                             room.get("host_rank", "Contender (1000)"),
                             room.get("host_avatar", "K"),
                             1 if room.get("is_public", True) else 0,
+                            room.get("host_user"),
+                            room.get("guest_name", "Friend"),
+                            room.get("guest_user"),
+                            room.get("guest_avatar", "k"),
                         ),
                     )
             except sqlite3.Error:
@@ -318,7 +365,7 @@ class MultiplayerHub:
         for client in stale:
             clients.discard(client)
 
-    def create_room(self, host_name="Player", host_rank="Contender (1000)", host_avatar="K", is_public=True):
+    def create_room(self, host_name="Player", host_rank="Contender (1000)", host_avatar="K", is_public=True, host_user=None):
         with self._lock:
             code = self._generate_code_locked()
             token = secrets.token_hex(8)
@@ -336,6 +383,10 @@ class MultiplayerHub:
                 "host_name": (host_name or "Player").strip() or "Player",
                 "host_rank": (host_rank or "Contender (1000)").strip() or "Contender (1000)",
                 "host_avatar": (host_avatar or "K").strip() or "K",
+                "host_user": (host_user or "").strip() or None,
+                "guest_name": "Friend",
+                "guest_user": None,
+                "guest_avatar": "k",
                 "is_public": bool(is_public),
             }
             self._save_room_locked(room)
@@ -370,7 +421,7 @@ class MultiplayerHub:
                     )
             return open_rooms
 
-    def join_room(self, code, token=None):
+    def join_room(self, code, token=None, guest_name="Friend", guest_user=None, guest_avatar="k"):
         cleaned = (code or "").strip().upper()
         if not cleaned:
             raise ValueError("Enter the 6-character code from your friend.")
@@ -385,6 +436,9 @@ class MultiplayerHub:
             if room["black_token"] is not None:
                 raise ValueError("That game already has two players connected.")
             room["black_token"] = secrets.token_hex(8)
+            room["guest_name"] = (guest_name or "Friend").strip() or "Friend"
+            room["guest_user"] = (guest_user or "").strip() or None
+            room["guest_avatar"] = (guest_avatar or "k").strip() or "k"
             room["version"] += 1
             room["message"] = "Friend connected! White to move."
             self._save_room_locked(room)
@@ -417,9 +471,115 @@ class MultiplayerHub:
             room["moves"] = updated["moves"]
             room["version"] += 1
             room["message"] = f"{mover} played {san}."
+            
+            # Check if this move ends the game
+            new_board = game.restore({"moves": room["moves"], "selected": None})
+            if new_board.is_game_over(claim_draw=True):
+                outcome = new_board.outcome(claim_draw=True)
+                if outcome and outcome.winner == chess.WHITE:
+                    res = "1-0"
+                    desc = "White won by checkmate" if new_board.is_checkmate() else "White won"
+                elif outcome and outcome.winner == chess.BLACK:
+                    res = "0-1"
+                    desc = "Black won by checkmate" if new_board.is_checkmate() else "Black won"
+                else:
+                    res = "½-½"
+                    desc = "Draw by stalemate" if new_board.is_stalemate() else "Draw"
+                self.record_completed_game(
+                    code=cleaned,
+                    white_name=room.get("host_name", "Player"),
+                    white_user=room.get("host_user"),
+                    white_avatar=room.get("host_avatar", "K"),
+                    black_name=room.get("guest_name", "Friend"),
+                    black_user=room.get("guest_user"),
+                    black_avatar=room.get("guest_avatar", "k"),
+                    result=res,
+                    result_desc=desc,
+                    moves_count=len(room["moves"]),
+                )
+            
             self._save_room_locked(room)
             self._broadcast_locked(room)
             return self._snapshot(room, token), san
+
+    def record_completed_game(
+        self,
+        code,
+        white_name="Player",
+        white_user=None,
+        white_avatar="K",
+        black_name="Friend",
+        black_user=None,
+        black_avatar="k",
+        result="1-0",
+        result_desc="Checkmate",
+        moves_count=0,
+    ):
+        now = time.time()
+        entry = {
+            "code": code,
+            "white_name": white_name,
+            "white_user": (white_user or "").strip() or None,
+            "white_avatar": white_avatar,
+            "black_name": black_name,
+            "black_user": (black_user or "").strip() or None,
+            "black_avatar": black_avatar,
+            "result": result,
+            "result_desc": result_desc,
+            "moves_count": int(moves_count),
+            "completed_at": now,
+        }
+        with self._lock:
+            self._memory_completed_games.insert(0, entry)
+            if len(self._memory_completed_games) > 100:
+                self._memory_completed_games.pop()
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        conn.execute(
+                            """
+                            INSERT INTO completed_games (
+                                code, white_name, white_user, white_avatar,
+                                black_name, black_user, black_avatar,
+                                result, result_desc, moves_count, completed_at
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                code,
+                                entry["white_name"],
+                                entry["white_user"],
+                                entry["white_avatar"],
+                                entry["black_name"],
+                                entry["black_user"],
+                                entry["black_avatar"],
+                                entry["result"],
+                                entry["result_desc"],
+                                entry["moves_count"],
+                                now,
+                            ),
+                        )
+                except sqlite3.Error:
+                    pass
+        return entry
+
+    def get_recent_completed_games(self, limit=10):
+        with self._lock:
+            games = []
+            if self._db_path:
+                try:
+                    with self._connect_db() as conn:
+                        rows = conn.execute(
+                            "SELECT * FROM completed_games ORDER BY id DESC LIMIT ?",
+                            (limit,),
+                        ).fetchall()
+                        for row in rows:
+                            games.append(dict(row))
+                except sqlite3.Error:
+                    pass
+            if not games:
+                games = list(self._memory_completed_games[:limit])
+            return games[:limit]
 
     def reset_room(self, code, token):
         cleaned = (code or "").strip().upper()

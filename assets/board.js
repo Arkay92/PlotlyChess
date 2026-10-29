@@ -24,6 +24,8 @@
             busyTimer = null;
         }
         document.getElementById('board')?.setAttribute('aria-busy', 'false');
+        document.querySelectorAll('.move-ghost, .drag-ghost').forEach(el => el.remove());
+        document.querySelectorAll('.drag-source').forEach(el => el.classList.remove('drag-source'));
         if (queuedAction) {
             const next = queuedAction;
             queuedAction = null;
@@ -132,38 +134,83 @@
         }
     }
 
+    function animateMoveGhost(fromSq, toSq) {
+        if (!fromSq || !toSq || fromSq === toSq) return;
+        const piece = fromSq.querySelector('.piece');
+        if (!piece) return;
+
+        document.querySelectorAll('.move-ghost, .drag-ghost').forEach(el => el.remove());
+
+        const rFrom = fromSq.getBoundingClientRect();
+        const rTo = toSq.getBoundingClientRect();
+
+        const ghost = piece.cloneNode(true);
+        ghost.className = 'move-ghost';
+        ghost.style.width = `${rFrom.width * 0.86}px`;
+        ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
+        ghost.style.top = `${rFrom.top + rFrom.height / 2}px`;
+        document.body.appendChild(ghost);
+
+        fromSq.classList.add('drag-source');
+        const targetPiece = toSq.querySelector('.piece');
+        if (targetPiece) targetPiece.style.opacity = '0';
+
+        document.querySelectorAll('.square.selected, .square.legal-target, .square.legal-capture, .drag-legal, .drag-over')
+            .forEach(el => el.classList.remove('selected', 'legal-target', 'legal-capture', 'drag-legal', 'drag-over'));
+
+        requestAnimationFrame(() => {
+            ghost.style.transition = 'left 0.14s cubic-bezier(0.2, 0, 0.2, 1), top 0.14s cubic-bezier(0.2, 0, 0.2, 1)';
+            ghost.style.left = `${rTo.left + rTo.width / 2}px`;
+            ghost.style.top = `${rTo.top + rTo.height / 2}px`;
+        });
+
+        setTimeout(() => ghost.remove(), 250);
+    }
+
     function cleanup() {
         if (gesture?.ghost) gesture.ghost.remove();
-        gesture?.source.classList.remove('drag-source');
-        document.querySelectorAll('.drag-over,.drag-legal').forEach(el => el.classList.remove('drag-over', 'drag-legal'));
         gesture = null;
+        document.querySelectorAll('.drag-over,.drag-legal').forEach(el => el.classList.remove('drag-over', 'drag-legal'));
     }
 
     document.addEventListener('pointerdown', (event) => {
         const source = squareAt(event.target);
         if (!source || event.button !== 0 || isBusy() || gesture || !event.isPrimary) return;
-        if (source.dataset.movable !== 'true') return;
-        gesture = {source, id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false};
-        source.setPointerCapture(event.pointerId);
+        const canDrag = source.dataset.movable === 'true';
+        gesture = {
+            source,
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            dragging: false,
+            canDrag: canDrag
+        };
+        try {
+            source.setPointerCapture(event.pointerId);
+        } catch (_) {}
     });
 
     document.addEventListener('pointermove', (event) => {
         if (!gesture || gesture.id !== event.pointerId || gesture.cancelled) return;
+        if (!gesture.canDrag) return;
         if (!gesture.dragging && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 6) {
             gesture.dragging = true;
             gesture.source.classList.add('drag-source');
-            const ghost = gesture.source.querySelector('.piece').cloneNode(true);
-            const rect = gesture.source.getBoundingClientRect();
-            ghost.className = 'drag-ghost';
-            ghost.style.width = `${rect.width * .86}px`;
-            document.body.appendChild(ghost);
-            gesture.ghost = ghost;
-            const legal = gesture.source.dataset.legal.split(',');
-            grid().querySelectorAll('.square').forEach(el => {
+            const piece = gesture.source.querySelector('.piece');
+            if (piece) {
+                const ghost = piece.cloneNode(true);
+                const rect = gesture.source.getBoundingClientRect();
+                ghost.className = 'drag-ghost';
+                ghost.style.width = `${rect.width * .86}px`;
+                document.body.appendChild(ghost);
+                gesture.ghost = ghost;
+            }
+            const legal = (gesture.source.dataset.legal || '').split(',').filter(Boolean);
+            grid()?.querySelectorAll('.square').forEach(el => {
                 if (legal.includes(el.dataset.square)) el.classList.add('drag-legal');
             });
         }
-        if (!gesture.dragging) return;
+        if (!gesture.dragging || !gesture.ghost) return;
         event.preventDefault();
         gesture.ghost.style.left = `${event.clientX}px`;
         gesture.ghost.style.top = `${event.clientY}px`;
@@ -173,8 +220,10 @@
 
     document.addEventListener('pointerup', (event) => {
         if (!gesture || gesture.id !== event.pointerId) return;
-        const {source, dragging} = gesture;
-        if (source.hasPointerCapture(event.pointerId)) source.releasePointerCapture(event.pointerId);
+        const {source, dragging, x, y} = gesture;
+        try {
+            if (source.hasPointerCapture(event.pointerId)) source.releasePointerCapture(event.pointerId);
+        } catch (_) {}
         if (gesture.cancelled) {
             suppressClickUntil = performance.now() + 400;
             suppressedSquare = source.dataset.square;
@@ -185,24 +234,101 @@
             const target = squareAt(document.elementFromPoint(event.clientX, event.clientY));
             suppressClickUntil = performance.now() + 400;
             suppressedSquare = source.dataset.square;
-            cleanup();
-            if (target && target !== source) send({type: 'drop', from: Number(source.dataset.square), to: Number(target.dataset.square)});
+
+            const legalMoves = (source.dataset.legal || '').split(',').filter(Boolean);
+            const isLegal = target && legalMoves.includes(target.dataset.square);
+
+            if (target && target !== source && isLegal) {
+                if (gesture.ghost) {
+                    const rTo = target.getBoundingClientRect();
+                    const ghost = gesture.ghost;
+                    gesture.ghost = null;
+                    ghost.className = 'move-ghost';
+                    ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
+                    ghost.style.left = `${rTo.left + rTo.width / 2}px`;
+                    ghost.style.top = `${rTo.top + rTo.height / 2}px`;
+                    setTimeout(() => ghost.remove(), 250);
+                }
+                cleanup();
+                send({type: 'drop', from: Number(source.dataset.square), to: Number(target.dataset.square)});
+            } else {
+                if (gesture.ghost) {
+                    const rFrom = source.getBoundingClientRect();
+                    const ghost = gesture.ghost;
+                    gesture.ghost = null;
+                    ghost.className = 'move-ghost';
+                    ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
+                    ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
+                    ghost.style.top = `${rFrom.top + rFrom.height / 2}px`;
+                    setTimeout(() => {
+                        ghost.remove();
+                        source.classList.remove('drag-source');
+                    }, 140);
+                }
+                cleanup();
+            }
         } else {
+            const dist = Math.hypot(event.clientX - x, event.clientY - y);
             cleanup();
-            suppressClickUntil = performance.now() + 400;
-            suppressedSquare = source.dataset.square;
-            send({type: 'click', square: Number(source.dataset.square)});
+            if (dist < 12) {
+                suppressClickUntil = performance.now() + 400;
+                suppressedSquare = source.dataset.square;
+
+                const selectedSq = document.querySelector('.square.selected');
+                if (selectedSq && selectedSq !== source && (source.classList.contains('legal-target') || source.classList.contains('legal-capture'))) {
+                    animateMoveGhost(selectedSq, source);
+                }
+
+                send({type: 'click', square: Number(source.dataset.square)});
+            }
         }
     });
 
     document.addEventListener('click', (event) => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+        const friendsToggle = target.closest('#friends-toggle-btn, #friends-close-btn');
+        if (friendsToggle) {
+            const box = document.getElementById('friends-widget');
+            if (box) {
+                box.classList.toggle('friends-open');
+            }
+            return;
+        }
+        const profileBtn = target.closest('[data-view-profile]');
+        if (profileBtn) {
+            const user = profileBtn.dataset.viewProfile || '';
+            if (user) {
+                send({type: 'view-profile', username: user});
+            }
+            return;
+        }
+        const toggleFriendBtn = target.closest('[data-toggle-friend]');
+        if (toggleFriendBtn) {
+            const friendUser = toggleFriendBtn.dataset.toggleFriend || '';
+            if (friendUser) {
+                send({type: 'toggle-friend', username: friendUser});
+            }
+            return;
+        }
+        const burgerBtn = target.closest('#burger-menu-btn');
+        const siteNav = document.getElementById('site-nav');
+        if (burgerBtn) {
+            const isOpen = siteNav?.classList.toggle('nav-open');
+            burgerBtn.setAttribute('aria-expanded', String(Boolean(isOpen)));
+            return;
+        }
+        if (siteNav?.classList.contains('nav-open')) {
+            if (!siteNav.contains(target) || target.closest('#site-nav button, #site-nav a')) {
+                siteNav.classList.remove('nav-open');
+                document.getElementById('burger-menu-btn')?.setAttribute('aria-expanded', 'false');
+            }
+        }
         const userMenu = document.getElementById('user-menu');
         if (userMenu?.hasAttribute('open') && (!userMenu.contains(target) || target.closest('.user-dropdown-menu button'))) {
             setTimeout(() => userMenu.removeAttribute('open'), 50);
         }
-        const homeOrLeaveBtn = target.closest('#brand-home-btn, #nav-play-btn, #mp-leave-btn, #nav-profile-btn, #nav-leaderboard-btn, #mp-tab-lobby-btn, #mp-tab-find-btn, #mp-choose-join-btn');
+        const homeOrLeaveBtn = target.closest('#brand-home-btn, #nav-play-btn, #mp-leave-btn, #nav-profile-btn, #nav-leaderboard-btn, #mp-tab-lobby-btn, #mp-tab-find-btn, #mp-choose-join-btn, #nav-about-btn, #footer-about-btn, #menu-about-btn, #about-back-btn');
         if (homeOrLeaveBtn) {
             queuedAction = null;
             suppressSocketUntil = performance.now() + 1500;
@@ -282,6 +408,13 @@
     document.addEventListener('pointercancel', cleanup);
 
     document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            const siteNav = document.getElementById('site-nav');
+            if (siteNav?.classList.contains('nav-open')) {
+                siteNav.classList.remove('nav-open');
+                document.getElementById('burger-menu-btn')?.setAttribute('aria-expanded', 'false');
+            }
+        }
         if (event.key === 'Escape' && gesture) {
             gesture.cancelled = true;
             gesture.ghost?.remove();
