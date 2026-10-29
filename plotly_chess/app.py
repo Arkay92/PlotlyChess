@@ -1526,7 +1526,7 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                     mode = 'multiplayer'
                     in_lobby = False
                 else:
-                    mode = mode or 'computer'
+                    mode = mode if mode in ('ai', 'local', 'multiplayer') else 'ai'
                     in_lobby = (mode == 'multiplayer')
                     mp = {'view': 'choice'} if in_lobby else {}
                 state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}
@@ -1542,7 +1542,7 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                     mode = 'multiplayer'
                     in_lobby = False
                 else:
-                    mode = mode or 'computer'
+                    mode = mode if mode in ('ai', 'local', 'multiplayer') else 'ai'
                     in_lobby = (mode == 'multiplayer')
                     mp = {'view': 'choice'} if in_lobby else {}
                 state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}
@@ -1557,7 +1557,7 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                 mode = 'multiplayer'
                 in_lobby = False
             else:
-                mode = mode or 'computer'
+                mode = mode if mode in ('ai', 'local', 'multiplayer') else 'ai'
                 in_lobby = (mode == 'multiplayer')
                 mp = {'view': 'choice'} if in_lobby else {}
             state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}

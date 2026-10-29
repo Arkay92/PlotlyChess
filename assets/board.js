@@ -195,7 +195,8 @@
     document.addEventListener('pointermove', (event) => {
         if (!gesture || gesture.id !== event.pointerId || gesture.cancelled) return;
         if (!gesture.canDrag) return;
-        if (!gesture.dragging && Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 6) {
+        const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
+        if (!gesture.dragging && dist > 6) {
             gesture.dragging = true;
             gesture.source.classList.add('drag-source');
             const piece = gesture.source.querySelector('.piece');
