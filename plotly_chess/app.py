@@ -1526,9 +1526,9 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                     mode = 'multiplayer'
                     in_lobby = False
                 else:
-                    mode = 'multiplayer'
-                    in_lobby = True
-                    mp = {'view': 'choice'}
+                    mode = mode or 'computer'
+                    in_lobby = (mode == 'multiplayer')
+                    mp = {'view': 'choice'} if in_lobby else {}
                 state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}
                 message = f'Welcome back, {auth["display_name"]} ({auth["rank"]}). Choose or start a game.'
             except ValueError as exc:
@@ -1542,9 +1542,9 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                     mode = 'multiplayer'
                     in_lobby = False
                 else:
-                    mode = 'multiplayer'
-                    in_lobby = True
-                    mp = {'view': 'choice'}
+                    mode = mode or 'computer'
+                    in_lobby = (mode == 'multiplayer')
+                    mp = {'view': 'choice'} if in_lobby else {}
                 state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}
                 message = f'Account created. Welcome, {auth["display_name"]} ({auth["rank"]})!'
             except ValueError as exc:
@@ -1557,9 +1557,9 @@ def create_app(app=None, hub=None, auth_store=None, auth=None):
                 mode = 'multiplayer'
                 in_lobby = False
             else:
-                mode = 'multiplayer'
-                in_lobby = True
-                mp = {'view': 'choice'}
+                mode = mode or 'computer'
+                in_lobby = (mode == 'multiplayer')
+                mp = {'view': 'choice'} if in_lobby else {}
             state = {**state, 'auth': auth, 'page': page, 'in_lobby': in_lobby, 'mp': mp, 'saved_games': saved_games}
             message = 'Playing as guest. Host, join, or start a game.'
         elif trigger == 'auth-logout-btn':

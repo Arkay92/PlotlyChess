@@ -46,7 +46,7 @@
         }
         busy = true;
         if (busyTimer) clearTimeout(busyTimer);
-        busyTimer = setTimeout(clearBusy, 400);
+        busyTimer = setTimeout(clearBusy, 4000);
         document.getElementById('board')?.setAttribute('aria-busy', 'true');
         window.dash_clientside.set_props('board-action', {data: {...action, nonce: ++sequence}});
     }
@@ -163,8 +163,7 @@
             ghost.style.left = `${rTo.left + rTo.width / 2}px`;
             ghost.style.top = `${rTo.top + rTo.height / 2}px`;
         });
-
-        setTimeout(() => ghost.remove(), 250);
+        // Pinned over toSq until server renders new board and MutationObserver runs clearBusy
     }
 
     function cleanup() {
@@ -177,11 +176,14 @@
         const source = squareAt(event.target);
         if (!source || event.button !== 0 || isBusy() || gesture || !event.isPrimary) return;
         const canDrag = source.dataset.movable === 'true';
+        const rect = source.getBoundingClientRect();
         gesture = {
             source,
             id: event.pointerId,
-            x: event.clientX,
-            y: event.clientY,
+            startX: event.clientX,
+            startY: event.clientY,
+            offsetX: event.clientX - (rect.left + rect.width / 2),
+            offsetY: event.clientY - (rect.top + rect.height / 2),
             dragging: false,
             canDrag: canDrag
         };
@@ -193,7 +195,7 @@
     document.addEventListener('pointermove', (event) => {
         if (!gesture || gesture.id !== event.pointerId || gesture.cancelled) return;
         if (!gesture.canDrag) return;
-        if (!gesture.dragging && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 6) {
+        if (!gesture.dragging && Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 6) {
             gesture.dragging = true;
             gesture.source.classList.add('drag-source');
             const piece = gesture.source.querySelector('.piece');
@@ -201,7 +203,9 @@
                 const ghost = piece.cloneNode(true);
                 const rect = gesture.source.getBoundingClientRect();
                 ghost.className = 'drag-ghost';
-                ghost.style.width = `${rect.width * .86}px`;
+                ghost.style.width = `${rect.width * 0.86}px`;
+                ghost.style.left = `${event.clientX - gesture.offsetX}px`;
+                ghost.style.top = `${event.clientY - gesture.offsetY}px`;
                 document.body.appendChild(ghost);
                 gesture.ghost = ghost;
             }
@@ -212,15 +216,15 @@
         }
         if (!gesture.dragging || !gesture.ghost) return;
         event.preventDefault();
-        gesture.ghost.style.left = `${event.clientX}px`;
-        gesture.ghost.style.top = `${event.clientY}px`;
+        gesture.ghost.style.left = `${event.clientX - gesture.offsetX}px`;
+        gesture.ghost.style.top = `${event.clientY - gesture.offsetY}px`;
         document.querySelector('.drag-over')?.classList.remove('drag-over');
         squareAt(document.elementFromPoint(event.clientX, event.clientY))?.classList.add('drag-over');
     }, {passive: false});
 
     document.addEventListener('pointerup', (event) => {
         if (!gesture || gesture.id !== event.pointerId) return;
-        const {source, dragging, x, y} = gesture;
+        const {source, dragging, startX, startY, ghost} = gesture;
         try {
             if (source.hasPointerCapture(event.pointerId)) source.releasePointerCapture(event.pointerId);
         } catch (_) {}
@@ -239,36 +243,40 @@
             const isLegal = target && legalMoves.includes(target.dataset.square);
 
             if (target && target !== source && isLegal) {
-                if (gesture.ghost) {
+                if (ghost) {
                     const rTo = target.getBoundingClientRect();
-                    const ghost = gesture.ghost;
                     gesture.ghost = null;
                     ghost.className = 'move-ghost';
-                    ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
-                    ghost.style.left = `${rTo.left + rTo.width / 2}px`;
-                    ghost.style.top = `${rTo.top + rTo.height / 2}px`;
-                    setTimeout(() => ghost.remove(), 250);
+                    const targetPiece = target.querySelector('.piece');
+                    if (targetPiece) targetPiece.style.opacity = '0';
+                    requestAnimationFrame(() => {
+                        ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
+                        ghost.style.left = `${rTo.left + rTo.width / 2}px`;
+                        ghost.style.top = `${rTo.top + rTo.height / 2}px`;
+                    });
+                    // Ghost stays pinned over target until server responds and MutationObserver clears busy
                 }
                 cleanup();
                 send({type: 'drop', from: Number(source.dataset.square), to: Number(target.dataset.square)});
             } else {
-                if (gesture.ghost) {
+                if (ghost) {
                     const rFrom = source.getBoundingClientRect();
-                    const ghost = gesture.ghost;
                     gesture.ghost = null;
                     ghost.className = 'move-ghost';
-                    ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
-                    ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
-                    ghost.style.top = `${rFrom.top + rFrom.height / 2}px`;
+                    requestAnimationFrame(() => {
+                        ghost.style.transition = 'left 0.14s cubic-bezier(0.2, 0, 0.2, 1), top 0.14s cubic-bezier(0.2, 0, 0.2, 1)';
+                        ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
+                        ghost.style.top = `${rFrom.top + rFrom.height / 2}px`;
+                    });
                     setTimeout(() => {
                         ghost.remove();
                         source.classList.remove('drag-source');
-                    }, 140);
+                    }, 160);
                 }
                 cleanup();
             }
         } else {
-            const dist = Math.hypot(event.clientX - x, event.clientY - y);
+            const dist = Math.hypot(event.clientX - startX, event.clientY - startY);
             cleanup();
             if (dist < 12) {
                 suppressClickUntil = performance.now() + 400;
@@ -432,10 +440,23 @@
     window.addEventListener('blur', cleanup);
 
     const observer = new MutationObserver((records) => {
-        if (records.some(record => record.target?.id === 'board' || record.target?.classList?.contains('chess-grid'))) {
+        let boardChanged = false;
+        for (const record of records) {
+            const t = record.target;
+            if (t && (t.id === 'board' || t.classList?.contains('chess-grid') || t.closest?.('#board'))) {
+                boardChanged = true;
+                break;
+            }
+        }
+        if (boardChanged) {
             clearBusy();
         }
         syncMultiplayerSocket();
     });
-    observer.observe(document.documentElement, {attributes: true, childList: true, attributeFilter: ['data-busy', 'data-room-code', 'data-mp-version'], subtree: true});
+    observer.observe(document.documentElement, {
+        attributes: true,
+        childList: true,
+        attributeFilter: ['data-busy', 'data-room-code', 'data-mp-version', 'data-fen'],
+        subtree: true
+    });
 })();
